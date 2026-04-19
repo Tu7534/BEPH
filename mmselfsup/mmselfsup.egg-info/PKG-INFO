@@ -1,0 +1,80 @@
+Metadata-Version: 2.4
+Name: mmselfsup
+Version: 1.0.0
+Summary: OpenMMLab Self-Supervised Learning Toolbox and Benchmark
+Home-page: https://github.com/open-mmlab/mmselfsup
+Author: MMSelfSup Contributors
+Author-email: openmmlab@gmail.com
+License: Apache License 2.0
+Keywords: unsupervised learning,self-supervised learning
+Classifier: Development Status :: 4 - Beta
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: attrs
+Requires-Dist: einops
+Requires-Dist: future
+Requires-Dist: matplotlib
+Requires-Dist: mmcls<1.1.0,>=1.0.0rc6
+Requires-Dist: numpy
+Requires-Dist: packaging
+Requires-Dist: scikit-learn
+Requires-Dist: scipy
+Requires-Dist: six
+Requires-Dist: tensorboard
+Requires-Dist: tqdm
+Provides-Extra: all
+Requires-Dist: attrs; extra == "all"
+Requires-Dist: einops; extra == "all"
+Requires-Dist: future; extra == "all"
+Requires-Dist: matplotlib; extra == "all"
+Requires-Dist: mmcls<1.1.0,>=1.0.0rc6; extra == "all"
+Requires-Dist: numpy; extra == "all"
+Requires-Dist: packaging; extra == "all"
+Requires-Dist: scikit-learn; extra == "all"
+Requires-Dist: scipy; extra == "all"
+Requires-Dist: six; extra == "all"
+Requires-Dist: tensorboard; extra == "all"
+Requires-Dist: tqdm; extra == "all"
+Requires-Dist: asynctest; extra == "all"
+Requires-Dist: coverage; extra == "all"
+Requires-Dist: flake8; extra == "all"
+Requires-Dist: interrogate; extra == "all"
+Requires-Dist: isort==5.10.1; extra == "all"
+Requires-Dist: kwarray; extra == "all"
+Requires-Dist: pytest; extra == "all"
+Requires-Dist: xdoctest>=0.10.0; extra == "all"
+Requires-Dist: yapf; extra == "all"
+Provides-Extra: tests
+Requires-Dist: asynctest; extra == "tests"
+Requires-Dist: coverage; extra == "tests"
+Requires-Dist: flake8; extra == "tests"
+Requires-Dist: interrogate; extra == "tests"
+Requires-Dist: isort==5.10.1; extra == "tests"
+Requires-Dist: kwarray; extra == "tests"
+Requires-Dist: pytest; extra == "tests"
+Requires-Dist: xdoctest>=0.10.0; extra == "tests"
+Requires-Dist: yapf; extra == "tests"
+Provides-Extra: optional
+Requires-Dist: faiss-gpu==1.7.2; extra == "optional"
+Requires-Dist: pandas; extra == "optional"
+Provides-Extra: mim
+Requires-Dist: mmcls<1.1.0,>=1.0.0rc6; extra == "mim"
+Requires-Dist: mmcv<2.1.0,>=2.0.0rc4; extra == "mim"
+Requires-Dist: mmengine<1.0.0,>=0.4.0; extra == "mim"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: license-file
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: summary

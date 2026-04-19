@@ -1,0 +1,32 @@
+create_pateches_kz 空转图像分割
+extract_features_fp_BEPH_kz 空转patches特征提取
+python CLAM_Feature/extract_features_fp_BEPH.py --data_h5_dir ./PATCH_DIRECTORY/patch_splits --data_slide_dir ./DATA_DIRECTORY/ --csv_path ./PATCH_DIRECTORY/patch_splits/process_list_autogen.csv --feat_dir ./FEATURES_DIRECTORY --batch_size 32 --slide_ext .svs
+
+# 存放目录
+
+├── kz_data/
+├   ── Raw_Data/                  
+│   |   ├── h5ad_files/               # [放入] 所有的 .h5ad 文件
+│   |   │   ├── Sample_A.h5ad
+│   |   │   ├── Sample_B.h5ad
+│   |   │   └── ...
+│   |   │
+│   |   └── images/                   # [放入] 所有的图片 (必须重命名！)
+│   |       ├── Sample_A.png          # 名字必须和 h5ad 文件名一致 (不带后缀部分)
+│   |       ├── Sample_B.png
+│   |       └── ...
+│   |
+│   ├── Segmentation/          # [第二步输出] 存放分割后的坐标和Mask
+│   │   ├── masks/                # 存放分割可视化的缩略图 (用于检查)
+│   │   └── patches/              # 存放 .h5 坐标文件 (最关键的文件)
+│   │       ├── Sample_A.h5
+│   │       ├── Sample_B.h5
+│   │       └── ...
+│   │
+│   └── BEPH_Features/         # [第三步输出] 存放最终特征
+│       ├── h5_files/             # 包含 features 和 coords (用于分析)
+│       │   ├── Sample_A.h5
+│       │   └── ...
+│       └── pt_files/             # 包含 torch tensor (用于训练)
+│
+└── process_list.csv              # [索引文件] 包含所有要处理的 Sample ID

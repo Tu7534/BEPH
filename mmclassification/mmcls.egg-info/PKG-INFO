@@ -1,0 +1,72 @@
+Metadata-Version: 2.4
+Name: mmcls
+Version: 1.0.0rc6
+Summary: OpenMMLab Image Classification Toolbox and Benchmark
+Home-page: https://github.com/open-mmlab/mmclassification
+Author: MMClassification Contributors
+Author-email: openmmlab@gmail.com
+License: Apache License 2.0
+Keywords: computer vision,image classification
+Classifier: Development Status :: 4 - Beta
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: matplotlib
+Requires-Dist: modelindex
+Requires-Dist: numpy
+Requires-Dist: packaging
+Requires-Dist: rich
+Provides-Extra: all
+Requires-Dist: albumentations>=0.3.2; extra == "all"
+Requires-Dist: colorama; extra == "all"
+Requires-Dist: requests; extra == "all"
+Requires-Dist: matplotlib; extra == "all"
+Requires-Dist: modelindex; extra == "all"
+Requires-Dist: numpy; extra == "all"
+Requires-Dist: packaging; extra == "all"
+Requires-Dist: rich; extra == "all"
+Requires-Dist: codecov; extra == "all"
+Requires-Dist: flake8; extra == "all"
+Requires-Dist: interrogate; extra == "all"
+Requires-Dist: isort==4.3.21; extra == "all"
+Requires-Dist: mmdet>=3.0.0rc0; extra == "all"
+Requires-Dist: pytest; extra == "all"
+Requires-Dist: scikit-learn; extra == "all"
+Requires-Dist: xdoctest>=0.10.0; extra == "all"
+Requires-Dist: yapf; extra == "all"
+Provides-Extra: tests
+Requires-Dist: codecov; extra == "tests"
+Requires-Dist: flake8; extra == "tests"
+Requires-Dist: interrogate; extra == "tests"
+Requires-Dist: isort==4.3.21; extra == "tests"
+Requires-Dist: mmdet>=3.0.0rc0; extra == "tests"
+Requires-Dist: pytest; extra == "tests"
+Requires-Dist: scikit-learn; extra == "tests"
+Requires-Dist: xdoctest>=0.10.0; extra == "tests"
+Requires-Dist: yapf; extra == "tests"
+Provides-Extra: optional
+Requires-Dist: albumentations>=0.3.2; extra == "optional"
+Requires-Dist: colorama; extra == "optional"
+Requires-Dist: requests; extra == "optional"
+Provides-Extra: mim
+Requires-Dist: mmcv<=2.1.0,>=2.0.0rc4; extra == "mim"
+Requires-Dist: mmengine<1.0.0,>=0.7.1; extra == "mim"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: license-file
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
