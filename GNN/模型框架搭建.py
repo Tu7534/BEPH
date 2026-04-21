@@ -1,4 +1,23 @@
 # 在对比学习中，每个 Epoch 动态生成不同的损坏图（On-the-fly Augmentation）效果通常远好于预先生成固定的图。
+"""
+================================================================================
+脚本名称: 模型框架搭建.py (MorphGAT Model & Training Framework)
+
+功能描述:
+本脚本定义了 MorphGAT 的核心网络结构，并实现了节点级别的图对比学习 (Graph Contrastive Learning) 训练流程。
+
+核心机制:
+1. 动态图增强 (On-the-fly Augmentation): 每次取数据时，通过 MorphologicalDropEdge
+   根据形态学置信度，动态生成不同的损坏图 (Corrupted Graph)。
+2. 特征升维 (Feature Projection): 将 15 维的致密通路信号 (TPscore) 映射至高维空间 (128维)，
+   打破 GAT 的信息瓶颈。
+3. 形态学注意力 (MorphGATConv): 自定义的图卷积层，将形态学相似度作为先验偏差 (Bias) 
+   融入到注意力权重的计算中。
+4. 对比损失优化 (InfoNCE Loss): 最大化同一节点在原图和损坏图中的表示相似度，
+   促使模型学到鲁棒的肿瘤微环境空间表征。
+================================================================================
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -23,8 +42,8 @@ from corrupted_graph import MorphologicalDropEdge
 class ContrastiveGraphDataset(Dataset):
     def __init__(self, root_dir, p_overall=0.4, transform=None, pre_transform=None):
         """
-        root_dir: 原图路径 (不需要 corr_dir 了)
-        p_overall: 传递给增强模块的参数
+        root_dir: 原图路径 (包含 .pt 文件)
+        p_overall: 传递给增强模块的基础删边概率
         """
         self.root_dir = root_dir
         self.file_list = sorted(glob.glob(os.path.join(root_dir, "*.pt")))
@@ -47,11 +66,11 @@ class ContrastiveGraphDataset(Dataset):
         return data_orig, data_corr
     
 # ==========================================
-# 2. 模型定义 (保持不变)
+# 2. 模型定义
 # ==========================================
 class MorphGATConv(MessagePassing):
     def __init__(self, in_channels, out_channels, heads=1, concat=True, dropout=0.0, bias=True):
-        super().__init__(node_dim=0, aggr='add') # max可尝试
+        super().__init__(node_dim=0, aggr='add') 
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.heads = heads
@@ -59,7 +78,7 @@ class MorphGATConv(MessagePassing):
         self.dropout = dropout
 
         self.lin = nn.Linear(in_channels, heads * out_channels, bias=False)
-        self.att_src = nn.Parameter(torch.Tensor(1, heads, out_channels)) # 可学习参数
+        self.att_src = nn.Parameter(torch.Tensor(1, heads, out_channels)) 
         self.att_dst = nn.Parameter(torch.Tensor(1, heads, out_channels))
 
         if bias and concat:
@@ -107,41 +126,61 @@ class MorphGATConv(MessagePassing):
 
 
 class GCLModel_Morph(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
+    def __init__(self, in_channels=15, hidden_channels=128, out_channels=32):
+        """
+        in_channels: 初始节点特征维度 (14个通路 + 1个TPscore = 15)
+        """
         super().__init__()
-        self.heads1 = 4 #注意力头数
-        # 第一层图卷积
-        self.conv1 = MorphGATConv(in_channels, hidden_channels, heads=self.heads1, concat=True)
-        # 跳连接的线性投影层：匹配输入和第一层输出的维度
-        self.skip_proj = nn.Linear(in_channels, hidden_channels * self.heads1)
-        # 计算第一层卷积后的输出维度
+        
+        # 🌟 1. 动态升维模块 (15 -> 64 -> 128)
+        self.feature_proj = nn.Sequential(
+            nn.Linear(in_channels, 64),
+            nn.LayerNorm(64),
+            nn.GELU(),
+            nn.Linear(64, hidden_channels),
+            nn.LayerNorm(hidden_channels),
+            nn.GELU()
+        )
+        
+        self.heads1 = 4 # 注意力头数
+        
+        # 2. 第一层图卷积 (此时输入已经是 hidden_channels)
+        self.conv1 = MorphGATConv(hidden_channels, hidden_channels, heads=self.heads1, concat=True)
+        
+        # 跳连接的线性投影层：匹配升维后的隐层维度和第一层卷积的输出维度
+        self.skip_proj = nn.Linear(hidden_channels, hidden_channels * self.heads1)
+        
+        # 3. 第二层图卷积 （输出维度=hidden_channels）
         dim_after_conv1 = hidden_channels * self.heads1
-        # 第二层图卷积 （输出维度=hidden_channels）
         self.conv2 = MorphGATConv(dim_after_conv1, hidden_channels, heads=1, concat=False)
-        # 投影头：将hidden维度的节点嵌入映射到最终输出维度out_channels
+        
+        # 4. 投影头：将hidden维度的节点嵌入映射到最终对比学习的输出维度 out_channels
         self.proj_head = nn.Sequential(
             nn.Linear(hidden_channels, hidden_channels),
             nn.ReLU(),
             nn.Linear(hidden_channels, out_channels)
-        )# 全连接层
+        )
 
     def forward(self, x, edge_index, edge_attr):
-        x_in = x
+        # 🌟 先对 15 维的特征进行升维解压缩
+        x = self.feature_proj(x)
+        x_in = x  # 保存升维后的特征，用于跳连接
+        
+        # 图卷积与聚合
         x = self.conv1(x, edge_index, edge_attr)
-        x = F.elu(x)# ELU激活函数（比ReLU更友好，减少梯度消失）
-        x = x + self.skip_proj(x_in)
-        # Dropout正则化：随机丢弃40%的神经元，防止过拟合
-        x = F.dropout(x, p=0.4, training=self.training)
+        x = F.elu(x) # ELU激活函数
+        x = x + self.skip_proj(x_in) # 跳连接
+        x = F.dropout(x, p=0.4, training=self.training) # Dropout正则化
+        
         x = self.conv2(x, edge_index, edge_attr)
-        node_emb = x
-        z = self.proj_head(node_emb)
-        return z, node_emb # 返回最终输出z和中间节点嵌入node_emb
+        node_emb = x # 用于下游任务的最终节点表征
+        
+        z = self.proj_head(node_emb) # 用于计算对比损失的潜向量
+        return z, node_emb 
     
-
 
 # ==========================================
 # 3. 训练流程 
-# 模型分别对两张图提取节点嵌入，通过对比损失让 “同一节点在不同图中的嵌入尽可能相似，不同节点的嵌入尽可能不同
 # ==========================================
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"[-] 使用设备: {DEVICE}")
@@ -157,30 +196,27 @@ if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
 
 # --- 数据准备 ---
-# 这里 p_overall=0.5 意味着每次训练，图结构都会有 50% 左右的变动（基于权重调整）
 full_dataset = ContrastiveGraphDataset(ROOT_DIR, p_overall=0.5)
-# 划分训练集（80%）和验证集（20%）
 train_size = int(0.8 * len(full_dataset))
 val_size = len(full_dataset) - train_size
 train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size])
-# 数据加载器：按批次加载数据，训练集shuffle=True（打乱顺序），验证集shuffle=False（无需打乱）
+
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-model = GCLModel_Morph(in_channels=768, hidden_channels=256, out_channels=128).to(DEVICE)
-# 优化器：Adam（最常用的自适应学习率优化器），带权重衰减（L2正则化）防止过拟合
+# 🌟 修正：将 in_channels 设为 15，hidden 设为 128
+model = GCLModel_Morph(in_channels=15, hidden_channels=128, out_channels=32).to(DEVICE)
 optimizer = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=1e-5)
 
 # 对比损失函数
 def contrastive_loss(z1, z2, temperature=0.5):
-    # 步骤1：L2归一化 → 让嵌入的模长为1，相似度仅由夹角决定（余弦相似度）
     z1 = F.normalize(z1, dim=1)
     z2 = F.normalize(z2, dim=1)
-    # 步骤2：计算相似度矩阵 → z1和z2的余弦相似度 / 温度系数
+    
+    # ⚠️注意：如果单个 Batch 内的 spot 点总数非常巨大(>30000)，这里可能会占用较大显存
     sim_matrix = torch.matmul(z1, z2.T) / temperature
-    # 步骤3：标签：每个样本的正例是自己（比如第i个样本的正例是z2的第i个）
     labels = torch.arange(z1.shape[0]).to(z1.device)
-    # 步骤4：交叉熵损失 → 让正例的相似度尽可能高，负例尽可能低
+    
     return F.cross_entropy(sim_matrix, labels)
 
 # --- 训练循环 ---
