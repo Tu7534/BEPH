@@ -4,3 +4,9 @@
 [2026-04-23 11:18:12] [WARNING] ✋ 触发早停机制！验证集 Loss 连续 30 轮未下降。
 [2026-04-23 11:18:12] [INFO] ✅ 训练周期结束！正在生成分析曲线图...
 [2026-04-23 11:18:13] [INFO] 📊 训练曲线已保存至: checkpoints/training_curves.png
+[2026-04-23 15:00:50] [INFO] 🚀 初始化训练任务 | PID: 2722841 | Device: cuda
+[2026-04-23 15:00:50] [INFO] 📂 加载数据集: /data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Graph_pt/
+[2026-04-23 15:00:51] [INFO] 🔥 开始对比学习训练...
+[2026-04-23 15:05:12] [WARNING] ✋ 触发早停机制！验证集 Loss 连续 50 轮未下降。
+[2026-04-23 15:05:12] [INFO] ✅ 训练周期结束！正在生成分析曲线图...
+[2026-04-23 15:05:13] [INFO] 📊 训练曲线已保存至: checkpoints/training_curves.png

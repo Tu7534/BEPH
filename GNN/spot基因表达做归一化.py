@@ -8,9 +8,9 @@ from pathlib import Path
 
 # ================= 配置区域 =================
 # 输入文件夹路径
-input_folder = "h5ad_files"
+input_folder = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Raw_Data/h5ad_files"
 # 输出文件夹路径
-output_folder = "Log1p"
+output_folder = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Raw_Data/Log1p"
 
 # 质量控制参数 (根据你的数据情况微调)
 MIN_COUNTS = 100  # 一个 Spot 至少要有 100 个 Count，否则视为垃圾点剔除

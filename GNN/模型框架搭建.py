@@ -348,8 +348,8 @@ if __name__ == "__main__":
     # 超参数
     parser.add_argument("--epochs", type=int, default=200, help="最大训练轮次")
     parser.add_argument("--batch_size", type=int, default=8, help="批次大小")
-    parser.add_argument("--lr", type=float, default=0.0005, help="学习率")
-    parser.add_argument("--temp", type=float, default=0.4, help="InfoNCE 温度系数")
+    parser.add_argument("--lr", type=float, default=0.0001, help="学习率")
+    parser.add_argument("--temp", type=float, default=0.5, help="InfoNCE 温度系数")
     parser.add_argument("--hidden_dim", type=int, default=128, help="GAT 隐藏层维度")
     parser.add_argument("--patience", type=int, default=50, help="早停容忍轮次")
 
