@@ -1,218 +1,289 @@
 """
 =============================================================================
-【BEPH 工业级提取器】空间转录组定制版形态学特征提取流水线
+【BEPH 工业级端到端特征流水线】 (End-to-End Visual Feature Pipeline)
 
-核心功能:
-摒弃了臃肿的 CLAM 依赖和 Openslide 报错隐患，使用最基础的 `PIL.Image` 直接操作高清 .png 图片。
-专为空间转录组 (ST) 的 Spot 切片数据量身定制，高效提取 BEPH (BEiT-v2) 模型的视觉特征。
+功能描述:
+本流水线将“坐标生成”与“深度学习特征提取”完美融合。
+一键实现：读取 .h5ad 坐标 -> 智能缩放 -> 图像边界检测 -> PIL切图转换 -> 
+MMSelfSup (BEiT-v2) 特征提取 -> 打包保存 .pt 和 .h5。
 
-工程化优势与亮点:
-1. 极简配置区 (Global Config): 将所有难记的路径 (根目录、模型权重、输入输出) 
-   集中在代码最上方，修改极度方便，告别冗长的命令行参数。
-2. PIL 替代 OpenSlide: 新建了 `PILSlide` 辅助类。因为空间转录组的切片大多已经是
-   单一的 .png 高清图，不需要用沉重的 openslide 去读金字塔层级，彻底解决了由于 
-   Libvips 导致的环境安装报错。
-3. 智能图像缩放 (Resize): 在 Dataset 中自动将 10x 的 48x48 Spot 放大至模型
-   所需要的 224x224 (Lanczos重采样)，保证特征提取不失真。
-4. 防崩塌与断点续传: `process_one_slide` 函数内置了强健的 try-except 保护。
-   自带 `os.path.exists` 检查，如果在 30 张切片里跑到第 15 张断电了，
-   再次运行会瞬间跳过前 14 张，直接从第 15 张继续提取。
-5. 双格式同步保存: 提取完毕后，不仅保存了附带坐标信息的 `features.h5`，还直接 
-   `torch.save` 保存了纯特征的 `.pt` 文件。这就为你下一步直接运行 `构建图结构.py` 
-   准备好了完美的食材！
+架构设计 (OOP):
+- `Config`: 全局配置中心，所有的路径和参数都在这里修改。
+- `CoordinateExtractor`: 空间坐标数学计算模块。
+- `SpatialPatchDataset`: PyTorch 标准数据加载器，负责图像的按需裁剪与预处理。
+- `FeatureExtractor`: 深度学习推理引擎。
+- `BEPHPipeline`: 流水线调度控制器，负责批处理、进度条和断点续传。
 =============================================================================
 """
 
-# cd /data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/
 import os
-import time
 import h5py
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from PIL import Image
 from tqdm import tqdm
-from mmengine.config import Config
+
+from mmengine.config import Config as MMConfig
 from mmengine.registry import init_default_scope
 from mmselfsup.apis import init_model
 
-# ================= 1. 全局配置区域 =================
-# 数据根目录 (请根据上一部的设置确认)
-ROOT_DIR = './kz_data' 
 
-# 输入目录
-PATCHES_DIR = os.path.join(ROOT_DIR, 'Segmentation', 'patches') # .h5 坐标文件
-IMAGES_DIR = os.path.join(ROOT_DIR, 'Raw_Data', 'images')       # .png 原始图片
-CSV_PATH = 'process_list.csv'                                   # 样本列表
+# ==========================================
+# 1. 全局配置类 (Configuration)
+# ==========================================
+class Config:
+    # 基础目录
+    ROOT_DIR = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data' 
+    H5AD_DIR = os.path.join(ROOT_DIR, 'Raw_Data', 'Log1p')
+    IMAGE_DIR = os.path.join(ROOT_DIR, 'Raw_Data', 'images')
+    CSV_PATH = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/process_list.csv'
 
-# 输出目录
-OUTPUT_DIR = os.path.join(ROOT_DIR, 'BEPH_Features')
-os.makedirs(os.path.join(OUTPUT_DIR, 'h5_files'), exist_ok=True)
-os.makedirs(os.path.join(OUTPUT_DIR, 'pt_files'), exist_ok=True)
+    # 输出目录
+    OUTPUT_DIR = os.path.join(ROOT_DIR, 'BEPH_Features')
+    COORD_SAVE_DIR = os.path.join(OUTPUT_DIR, 'patches')  # 保存临时坐标
+    H5_SAVE_DIR = os.path.join(OUTPUT_DIR, 'h5_files')    # 保存最终特征与坐标
+    PT_SAVE_DIR = os.path.join(OUTPUT_DIR, 'pt_files')    # 保存纯特征向量
 
-# 模型配置 (保持你提供的路径不变)
-MODEL_CONFIG = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/mmselfsup/configs/tsne/beitv2_base.py'
-MODEL_CHECKPOINT = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/checkpoints/BEPH_backbone.pth'
+    # 模型配置
+    MODEL_CONFIG = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/mmselfsup/configs/tsne/beitv2_base.py'
+    MODEL_CHECKPOINT = '/data/home/wangzz_group/zhaipengyuan/BEPH-main/checkpoints/BEPH_backbone.pth'
+    DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# 参数设置
-TARGET_PATCH_SIZE = 224  # 模型输入大小
-BATCH_SIZE = 128         # 显存允许的话建议调大 (48 -> 128 或 256) 加速
-DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-# =======================================================
+    # 图像与批处理参数
+    SRC_SIZE = 80             # 从原图裁剪的 Patch 大小
+    TARGET_SIZE = 224         # 缩放后喂给模型的 Patch 大小
+    BATCH_SIZE = 128          # DataLoader 批次大小
+    NUM_WORKERS = 4           # 多线程读取
 
-# --- 辅助类：模拟 OpenSlide ---
-class PILSlide:
-    def __init__(self, path):
-        Image.MAX_IMAGE_PIXELS = None
-        self.img = Image.open(path).convert('RGB')
-        self.level_dimensions = [self.img.size] 
+
+# ==========================================
+# 2. 坐标提取器 (Coordinate Extractor)
+# ==========================================
+class CoordinateExtractor:
+    """负责从 H5AD 解析坐标，计算缩放因子，并剔除越界 Patch"""
+    
+    @staticmethod
+    def get_valid_coords(h5ad_path, img_w, img_h):
+        adata = sc.read_h5ad(h5ad_path)
+        if 'spatial' not in adata.obsm.keys():
+            raise ValueError("No 'spatial' coords in obsm")
+
+        coords = adata.obsm['spatial']
+        scale_factor = 1.0
         
-    def read_region(self, location, level, size):
-        x, y = location
-        w, h = size
-        return self.img.crop((x, y, x + w, y + h))
+        # 智能获取缩放因子
+        library_id = list(adata.uns.get('spatial', {}).keys())[0] if adata.uns.get('spatial') else None
+        if library_id:
+            scalefactors = adata.uns['spatial'][library_id].get('scalefactors', {})
+            if 'tissue_hires_scalef' in scalefactors:
+                scale_factor = scalefactors['tissue_hires_scalef']
+            elif 'tissue_lowres_scalef' in scalefactors:
+                scale_factor = scalefactors['tissue_lowres_scalef']
 
-# --- Dataset 定义 ---
-def eval_transforms(mean, std):
-    return transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=mean, std=std)
-    ])
+        # 映射到像素坐标并计算左上角
+        pixel_coords = (coords * scale_factor).astype(int)
+        top_left_coords = pixel_coords - (Config.SRC_SIZE // 2)
+        
+        # 边界防爆检测
+        valid_coords = []
+        for x, y in top_left_coords:
+            if x >= 0 and y >= 0 and x + Config.SRC_SIZE <= img_w and y + Config.SRC_SIZE <= img_h:
+                valid_coords.append([x, y])
+                
+        valid_coords = np.array(valid_coords)
+        if len(valid_coords) == 0:
+            raise ValueError("0 valid patches after boundary check.")
+            
+        return valid_coords
 
-class Whole_Slide_Bag_FP(Dataset):
-    def __init__(self, file_path, wsi, target_patch_size=224):
-        self.wsi = wsi
-        self.file_path = file_path
-        self.target_patch_size = (target_patch_size, target_patch_size)
-        self.roi_transforms = transforms.Compose([transforms.ToTensor(),
-                                                  transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))])
 
-        with h5py.File(self.file_path, "r") as f:
-            dset = f['coords']
-            self.patch_size = f['coords'].attrs['patch_size']
-            self.patch_level = f['coords'].attrs['patch_level']
-            self.length = len(dset)
+# ==========================================
+# 3. 数据集加载器 (PyTorch Dataset)
+# ==========================================
+class SpatialPatchDataset(Dataset):
+    """根据提取的坐标，动态从 PIL 图像中裁剪 Patch 并转为 Tensor"""
+    
+    def __init__(self, image_path, coords):
+        Image.MAX_IMAGE_PIXELS = None
+        self.img = Image.open(image_path).convert('RGB')
+        self.coords = coords
+        
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+        ])
 
     def __len__(self):
-        return self.length
+        return len(self.coords)
 
     def __getitem__(self, idx):
-        with h5py.File(self.file_path, 'r') as hdf5_file:
-            coord = hdf5_file['coords'][idx]
+        x, y = self.coords[idx]
+        # 1. 裁剪 SRC_SIZE (例如 80x80)
+        patch = self.img.crop((x, y, x + Config.SRC_SIZE, y + Config.SRC_SIZE))
         
-        # 1. 从原图切取 (48x48)
-        img = self.wsi.read_region(coord, self.patch_level, (self.patch_size, self.patch_size)).convert('RGB')
+        # 2. Lanczos 高质量缩放到 TARGET_SIZE (224x224)
+        patch = patch.resize((Config.TARGET_SIZE, Config.TARGET_SIZE), Image.Resampling.LANCZOS)
         
-        # 2. 放大到模型需求 (224x224)
-        if self.target_patch_size is not None:
-            img = img.resize(self.target_patch_size, Image.Resampling.LANCZOS)
-            
-        img = self.roi_transforms(img)
-        return img, coord
+        # 3. 转 Tensor
+        patch_tensor = self.transform(patch)
+        return patch_tensor, self.coords[idx]
 
-def collate_features(batch):
-    img = torch.stack([item[0] for item in batch], dim=0)
+def collate_fn(batch):
+    """自定义 Collate Function，将 batch 打包"""
+    imgs = torch.stack([item[0] for item in batch], dim=0)
     coords = np.vstack([item[1] for item in batch])
-    return [img, coords]
+    return imgs, coords
 
-# ================= 核心处理逻辑 (修正版：增加保存 .pt) =================
-def process_one_slide(model, slide_id, h5_path, slide_path):
-    output_h5_name = os.path.join(OUTPUT_DIR, 'h5_files', slide_id + '.h5')
-    output_pt_name = os.path.join(OUTPUT_DIR, 'pt_files', slide_id + '.pt') # <--- 新增
+
+# ==========================================
+# 4. 深度学习推理引擎 (Feature Extractor)
+# ==========================================
+class FeatureExtractor:
+    """负责加载 BEiT 模型，吞吐 DataLoader 并提取特征"""
     
-    # 跳过检查 (如果两个都存在才跳过)
-    if os.path.exists(output_h5_name) and os.path.exists(output_pt_name):
-        print(f"⏩ [跳过] {slide_id} 已存在。")
-        return
+    def __init__(self):
+        print("\n⚙️ 正在初始化 BEPH 模型引擎...")
+        mm_cfg = MMConfig.fromfile(Config.MODEL_CONFIG)
+        init_default_scope(mm_cfg.get('default_scope', 'mmselfsup'))
+        self.model = init_model(mm_cfg, Config.MODEL_CHECKPOINT, device=Config.DEVICE)
+        self.model.eval()
+        print("✅ 模型加载成功！\n")
 
-    try:
-        # 1. 准备数据
-        wsi = PILSlide(slide_path)
-        dataset = Whole_Slide_Bag_FP(file_path=h5_path, wsi=wsi, target_patch_size=TARGET_PATCH_SIZE)
-        
-        if len(dataset) == 0:
-            print(f"⚠️ [跳过] {slide_id} 没有任何 patch。")
-            return
-
-        loader = DataLoader(dataset, batch_size=BATCH_SIZE, num_workers=4, pin_memory=True, collate_fn=collate_features)
-        
-        # 2. 提取特征
+    def extract(self, dataloader, slide_id):
         features_list = []
         coords_list = []
         
-        for batch, coords in tqdm(loader, desc=f"Ext: {slide_id}", leave=False):
-            with torch.no_grad():
-                batch = batch.to(DEVICE)
+        # 禁用梯度计算以节省显存
+        with torch.no_grad():
+            for batch_imgs, batch_coords in tqdm(dataloader, desc=f"🔍 提取 {slide_id}", leave=False):
+                batch_imgs = batch_imgs.to(Config.DEVICE)
                 
-                # mmselfsup 提取特征
-                if hasattr(model, 'module'):
-                    feat = model.module.extract_feat(batch, stage='backbone')[0]
+                # 兼容 DataParallel 或单卡
+                if hasattr(self.model, 'module'):
+                    feat = self.model.module.extract_feat(batch_imgs, stage='backbone')[0]
                 else:
-                    feat = model.extract_feat(batch, stage='backbone')[0]
+                    feat = self.model.extract_feat(batch_imgs, stage='backbone')[0]
                 
+                # 如果是 3D 张量 (Batch, 1, Dim)，压缩为 (Batch, Dim)
                 if len(feat.shape) == 3: 
                     feat = feat[:, 0, :] 
                 
-                features_list.append(feat.cpu().numpy().astype(np.float32)) 
-                coords_list.append(coords)
-
-        # 3. 整合
+                features_list.append(feat.cpu().numpy().astype(np.float32))
+                coords_list.append(batch_coords)
+                
         all_features = np.concatenate(features_list, axis=0)
         all_coords = np.concatenate(coords_list, axis=0)
-        
-        # 4. 保存 .h5 (特征 + 坐标)
-        with h5py.File(output_h5_name, 'w') as f:
-            f.create_dataset('features', data=all_features)
-            f.create_dataset('coords', data=all_coords)
-            
-        # 5. 保存 .pt (纯特征，用于快速训练) <--- 新增部分
-        torch.save(torch.from_numpy(all_features), output_pt_name)
-            
-        print(f"✅ 完成: {slide_id} -> Shape: {all_features.shape}")
+        return all_features, all_coords
 
-    except Exception as e:
-        print(f"❌ 错误 {slide_id}: {e}")
-# ================= 主程序入口 =================
+
+# ==========================================
+# 5. 流水线控制器 (Pipeline Manager)
+# ==========================================
+class BEPHPipeline:
+    """统筹整个前处理与特征提取流程"""
+    
+    def __init__(self):
+        # 自动创建所有必要的输出文件夹
+        for d in [Config.COORD_SAVE_DIR, Config.H5_SAVE_DIR, Config.PT_SAVE_DIR]:
+            os.makedirs(d, exist_ok=True)
+            
+        self.feature_extractor = FeatureExtractor()
+
+    def process_slide(self, slide_id):
+        """处理单个样本的核心流水线"""
+        h5ad_path = os.path.join(Config.H5AD_DIR, f"{slide_id}.h5ad")
+        image_path = os.path.join(Config.IMAGE_DIR, f"{slide_id}.png")
+        
+        out_h5 = os.path.join(Config.H5_SAVE_DIR, f"{slide_id}.h5")
+        out_pt = os.path.join(Config.PT_SAVE_DIR, f"{slide_id}.pt")
+        out_coord = os.path.join(Config.COORD_SAVE_DIR, f"{slide_id}.h5")
+
+        # 1. 检查断点续传
+        if os.path.exists(out_h5) and os.path.exists(out_pt):
+            return "Skipped (Already extracted)"
+            
+        if not os.path.exists(h5ad_path) or not os.path.exists(image_path):
+            return "Failed (Missing source files)"
+
+        try:
+            # 2. 坐标提取
+            Image.MAX_IMAGE_PIXELS = None
+            img_w, img_h = Image.open(image_path).size
+            valid_coords = CoordinateExtractor.get_valid_coords(h5ad_path, img_w, img_h)
+            
+            # (可选) 备份一份纯坐标文件，以备不时之需
+            with h5py.File(out_coord, 'w') as f:
+                f.create_dataset('coords', data=valid_coords)
+                f.attrs['patch_size'] = Config.SRC_SIZE
+
+            # 3. 构建 Dataset 和 DataLoader
+            dataset = SpatialPatchDataset(image_path, valid_coords)
+            loader = DataLoader(
+                dataset, 
+                batch_size=Config.BATCH_SIZE, 
+                num_workers=Config.NUM_WORKERS, 
+                pin_memory=True, 
+                collate_fn=collate_fn
+            )
+
+            # 4. 模型特征提取
+            features, coords = self.feature_extractor.extract(loader, slide_id)
+
+            # 5. 双格式保存
+            with h5py.File(out_h5, 'w') as f:
+                f.create_dataset('features', data=features)
+                f.create_dataset('coords', data=coords)
+                
+            torch.save(torch.from_numpy(features), out_pt)
+            
+            return f"Success ({len(coords)} patches)"
+
+        except Exception as e:
+            return f"Error ({str(e)})"
+
+    def run(self):
+        """主执行入口"""
+        if not os.path.exists(Config.CSV_PATH):
+            print(f"❌ 找不到名单文件: {Config.CSV_PATH}")
+            return
+            
+        df = pd.read_csv(Config.CSV_PATH)
+        ids = df['slide_id'].tolist() if 'slide_id' in df.columns else df.iloc[:, 0].tolist()
+        
+        print(f"🚀 启动 BEPH 工业级流水线，共 {len(ids)} 个样本待处理...\n")
+        
+        results = {'success': 0, 'skip': 0, 'fail': 0}
+        pbar = tqdm(ids, desc="Overall Progress")
+        
+        for slide_id in pbar:
+            slide_id = str(slide_id)
+            status_msg = self.process_slide(slide_id)
+            
+            if "Success" in status_msg:
+                results['success'] += 1
+            elif "Skipped" in status_msg:
+                results['skip'] += 1
+            else:
+                results['fail'] += 1
+                
+            pbar.set_postfix({'status': status_msg[:25]})
+            
+        print("\n" + "="*50)
+        print(f"✨ 流水线执行完毕！")
+        print(f"✅ 成功提取: {results['success']}")
+        print(f"⏩ 跳过已有: {results['skip']}")
+        print(f"❌ 提取失败: {results['fail']}")
+        print(f"📁 最终特征保存在: {Config.OUTPUT_DIR}")
+        print("="*50 + "\n")
+
+
+# ==========================================
+# 6. 启动器 (Main)
+# ==========================================
 if __name__ == "__main__":
-    # 1. 加载模型 (只加载一次！)
-    print("正在加载 BEPH 模型...")
-    try:
-        cfg = Config.fromfile(MODEL_CONFIG)
-        init_default_scope(cfg.get('default_scope', 'mmselfsup'))
-        model = init_model(cfg, MODEL_CHECKPOINT, device=DEVICE)
-        model.eval()
-        print("Model loaded successfully.")
-    except Exception as e:
-        print(f"❌ 模型加载失败: {e}")
-        exit()
-
-    # 2. 读取列表
-    if not os.path.exists(CSV_PATH):
-        print(f"CSV文件未找到: {CSV_PATH}")
-        exit()
-        
-    df = pd.read_csv(CSV_PATH)
-    ids = df.iloc[:, 0].tolist() if 'slide_id' not in df.columns else df['slide_id'].tolist()
-    
-    print(f"🚀 开始批量提取特征，共 {len(ids)} 个样本...")
-    
-    # 3. 循环处理
-    for slide_id in tqdm(ids, desc="Total Progress"):
-        # 构造路径
-        h5_file = os.path.join(PATCHES_DIR, f"{slide_id}.h5")
-        img_file = os.path.join(IMAGES_DIR, f"{slide_id}.png")
-        
-        if not os.path.exists(h5_file):
-            print(f"❌ 缺失 Patch 坐标文件: {h5_file}")
-            continue
-        if not os.path.exists(img_file):
-            print(f"❌ 缺失图片文件: {img_file}")
-            continue
-            
-        process_one_slide(model, str(slide_id), h5_file, img_file)
-        
-    print("\n✨ 全部任务结束！")
-    print(f"特征已保存在: {OUTPUT_DIR}")
+    pipeline = BEPHPipeline()
+    pipeline.run()
