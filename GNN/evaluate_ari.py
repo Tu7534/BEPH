@@ -1,3 +1,14 @@
+"""
+=============================================================================
+【工业级通用 ARI 评估脚本】 (文件内配参版)
+
+核心功能:
+- 支持任意空间转录组数据集的 ARI 评估。
+- 自动识别读取 `.h5` (10x 官方格式) 或 `.h5ad` (Scanpy 标准格式)。
+- 内置“暴力清洗”逻辑，自动抹平不同数据集中 Barcode 后缀和隐藏空格的差异，实现完美对齐。
+=============================================================================
+"""
+
 import torch
 import numpy as np
 import pandas as pd
@@ -9,55 +20,73 @@ import os
 # 导入你的模型类
 from 模型框架搭建 import GCLModel_Morph 
 
-def evaluate_ari_aligned_breast_cancer(pt_path, h5_path, model_path, truth_path):
+def evaluate_ari(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim):
     """
-    针对乳腺癌数据集进行 Barcode 对齐后的 ARI 计算
+    通用型 Barcode 对齐与 ARI 计算函数
     """
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # 1. 加载模型 (注意，这里的 hidden_channels 和 out_channels 必须和你训练时对应)
-    # 如果你刚才用 --hidden_dim 32 训练了，这里就得是 32
-    model = GCLModel_Morph(in_channels=15, hidden_channels=32, out_channels=32).to(DEVICE)
+    # 1. 加载模型
+    print(f"[-] 正在加载模型权重: {model_path}")
+    model = GCLModel_Morph(in_channels=15, hidden_channels=hidden_dim, out_channels=out_dim).to(DEVICE)
     model.load_state_dict(torch.load(model_path, map_location=DEVICE))
     model.eval()
 
     # 2. 提取模型预测的嵌入 (Embeddings)
+    print(f"[-] 正在加载图结构数据: {pt_path}")
     data = torch.load(pt_path).to(DEVICE)
     with torch.no_grad():
         _, node_emb = model(data.x, data.edge_index, data.edge_attr)
     embeddings = node_emb.cpu().numpy()
 
-    # 3. 获取原始 Barcode 顺序
-    # 使用 sc.read_10x_h5 读取 10x 官方的 H5 文件
-    print(f"[-] 正在加载表达矩阵: {h5_path}")
-    adata = sc.read_10x_h5(h5_path)
+    # 3. 智能读取表达矩阵获取 Barcode
+    print(f"[-] 正在加载表达矩阵: {expr_path}")
+    if expr_path.endswith('.h5ad'):
+        adata = sc.read_h5ad(expr_path)
+    else:
+        adata = sc.read_10x_h5(expr_path)
     
-    # scanpy读取10x数据时，barcode通常是带 '-1' 后缀的，这和真实标签文件通常是一致的
     barcodes = adata.obs_names.tolist()
-
-    # 创建一个包含预测结果的 DataFrame
     pred_df = pd.DataFrame({
         'barcode': barcodes,
         'embedding_idx': range(len(barcodes))
     })
 
-    # 4. 读取真实标签文件
-    # 根据之前生成的 metadata.txt，格式为: Barcode \t 标签
-    truth_df = pd.read_csv(truth_path, sep='\t', header=None, names=['barcode', 'label'])
-    print(f"[-] 成功加载真实标签: {len(truth_df)} 个 spot")
+    # 4. 读取真实标签文件 (尝试 utf-16 兼容 Excel 导出的文件，失败则回退 utf-8)
+    print(f"[-] 正在加载真实标签: {truth_path}")
+    try:
+        truth_full = pd.read_csv(truth_path, sep='\t', encoding='utf-16')
+        if len(truth_full.columns) < 2:  # 如果切错分隔符，尝试逗号
+            truth_full = pd.read_csv(truth_path, sep=',', encoding='utf-16')
+    except UnicodeError:
+        truth_full = pd.read_csv(truth_path, sep='\t', encoding='utf-8')
+        if len(truth_full.columns) < 2:
+            truth_full = pd.read_csv(truth_path, sep=',', encoding='utf-8')
 
-    # 5. 精确对齐：将预测的索引与真实标签合并
-    merged_df = pd.merge(truth_df, pred_df, on='barcode', how='inner')
+    # 从大表中精确提取我们需要的两列 (根据你的表格截图，列名是 ID 和 ground_truth)
+    truth_df = pd.DataFrame()
+    truth_df['barcode'] = truth_full['ID']
+    truth_df['label'] = truth_full['ground_truth']  
+    # 💡 提示：如果你想测试四大核心功能区(粗分类)的 ARI，可以把上一行改成 truth_full['annot_type']
     
-    # 清洗：剔除掉真实标签为空 (NaN) 的行，强制转换为字符串
+    # ================= 🚀 暴力清洗 Barcode 保证绝对对齐 =================
+    # 强制转字符串 -> 去掉前后空格回车 -> 去掉 '-1' 后缀
+    pred_df['barcode'] = pred_df['barcode'].astype(str).str.strip().str.replace('-1', '', regex=False)
+    truth_df['barcode'] = truth_df['barcode'].astype(str).str.strip().str.replace('-1', '', regex=False)
+    
+    print(f"🩺 H5 里的 Barcode 示例: {pred_df['barcode'].iloc[:3].tolist()}")
+    print(f"🩺 标签里的 Barcode 示例: {truth_df['barcode'].iloc[:3].tolist()}")
+    # ====================================================================
+
+    # 5. 精确对齐
+    merged_df = pd.merge(truth_df, pred_df, on='barcode', how='inner')
     merged_df = merged_df.dropna(subset=['label'])
     merged_df['label'] = merged_df['label'].astype(str)
     
     if len(merged_df) == 0:
-        print("❌ 错误：Barcode 无法匹配，请检查 H5 和 txt 文件的 Barcode 格式！")
+        print("❌ 错误：合并后的 Spot 数量为 0。请检查上述打印的 Barcode 示例，或者确认分隔符是否为制表符！")
         return
 
-    # 提取清洗对齐后的 embeddings 
     aligned_embeddings = embeddings[merged_df['embedding_idx'].values]
     true_labels = merged_df['label'].values
 
@@ -67,51 +96,59 @@ def evaluate_ari_aligned_breast_cancer(pt_path, h5_path, model_path, truth_path)
     
     kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
     
-    # === 特征健康度体检 ===
     emb_variance = np.var(aligned_embeddings, axis=0).mean()
     print(f"🩺 特征方差 (Variance): {emb_variance:.6f}")
-    print(f"🩺 前 3 个点的特征预览:\n{aligned_embeddings[:3, :5]}")
-    # ==========================
     
     pred_labels = kmeans.fit_predict(aligned_embeddings)
 
     # 7. 计算 ARI
     ari_score = adjusted_rand_score(true_labels, pred_labels)
 
-    print("\n" + "="*40)
-    print(f"📊 乳腺癌数据集最终对齐评估结果")
+    print("\n" + "="*50)
+    print(f"📊 最终对齐评估结果")
     print(f"🔥 Adjusted Rand Index (ARI): {ari_score:.4f}")
     print(f"✅ 参与评估的 Spot 总数: {len(merged_df)}")
-    print("="*40)
+    print("="*50)
 
-    # 基线测试：直接用原始特征跑
+    # 裸跑基线测试
     raw_features = data.x.cpu().numpy() 
     aligned_raw_features = raw_features[merged_df['embedding_idx'].values]
-    
-    print("\n[-] 正在对原始的 15 维特征进行裸聚类...")
     pred_labels_raw = kmeans.fit_predict(aligned_raw_features)
     ari_score_raw = adjusted_rand_score(true_labels, pred_labels_raw)
     
-    print("="*40)
-    print(f"裸跑基线 Adjusted Rand Index (ARI): {ari_score_raw:.4f}")
-    print("="*40)
+    print("\n" + "-"*50)
+    print(f"裸跑基线 (仅使用原始 15 维特征) ARI: {ari_score_raw:.4f}")
+    print("-"*50 + "\n")
     
     return ari_score
 
 if __name__ == "__main__":
-    # === 修改为乳腺癌数据的路径 ===
-    DATA_DIR = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)"
+    # ============================================================
+    # 🎯 配置区域 (每次跑不同数据时，只改这里即可) 🎯
+    # ============================================================
     
-    # 注意：你需要先跑一边你的图构建脚本，生成乳腺癌的 .pt 文件
-    # 这里假设你生成的 pt 文件名为 breast_cancer.pt，保存在之前的 Graph_pt 文件夹下
-    PT_FILE = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Graph_pt/breast_cancer.pt" 
+    # 1. 图结构文件 (.pt)
+    PT_FILE = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Graph_pt/breast_cancer.pt"
     
-    # 官方的表达矩阵
-    H5_FILE = os.path.join(DATA_DIR, "filtered_feature_bc_matrix.h5")
+    # 2. 表达矩阵文件 (.h5 或 .h5ad)
+    EXPR_FILE = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/filtered_feature_bc_matrix.h5"
     
-    # 你刚刚生成的包含病理学标签的文本文件
-    TRUTH_FILE = os.path.join(DATA_DIR, "metadata.txt")
+    # 3. 真实标签文件 (.txt 或 .tsv)
+    TRUTH_FILE = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/metadata.txt"
     
+    # 4. 训练好的模型权重
     MODEL_WEIGHTS = "checkpoints/best_model.pth"
 
-    evaluate_ari_aligned_breast_cancer(PT_FILE, H5_FILE, MODEL_WEIGHTS, TRUTH_FILE)
+    # 5. 模型结构参数 (必须和刚才训练时设置的 --hidden_dim 保持一致)
+    HIDDEN_DIM = 32  # 修复点：这里必须改成 32 以匹配你的训练权重
+    OUT_DIM = 32
+    # ============================================================
+
+    evaluate_ari(
+        pt_path=PT_FILE,
+        expr_path=EXPR_FILE,
+        model_path=MODEL_WEIGHTS,
+        truth_path=TRUTH_FILE,
+        hidden_dim=HIDDEN_DIM,
+        out_dim=OUT_DIM
+    )
