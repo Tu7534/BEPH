@@ -18,7 +18,7 @@ from sklearn.metrics import adjusted_rand_score
 import os
 
 # 导入你的模型类
-from 模型框架搭建 import GCLModel_Morph 
+from GNN.train import GCLModel_Morph 
 
 def evaluate_ari(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim):
     """
