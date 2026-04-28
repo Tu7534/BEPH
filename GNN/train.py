@@ -26,7 +26,7 @@ from torch.utils.data import random_split
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import softmax, to_dense_adj
+from torch_geometric.utils import softmax, to_dense_adj, to_dense_batch
 from torch_geometric.nn.inits import glorot, zeros
 from sklearn.cluster import KMeans
 
@@ -87,7 +87,7 @@ class MorphGATConv(MessagePassing):
         self.att_src = nn.Parameter(torch.Tensor(1, heads, out_channels)) 
         self.att_dst = nn.Parameter(torch.Tensor(1, heads, out_channels))
         self.bias = nn.Parameter(torch.Tensor(heads * out_channels if concat else out_channels))
-        self.bias_lambda = nn.Parameter(torch.tensor(2.0)) 
+        self.bias_lambda = nn.Parameter(torch.tensor(5.0)) 
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -168,44 +168,65 @@ def target_distribution(q):
     weight = q**2 / q.sum(0)
     return (weight.t() / weight.sum(1)).t()
 
-def spatial_contrastive_loss(z1, z2, edge_index, x_raw, temperature=0.2, hard_weight=3.0):
+def spatial_contrastive_loss(z1, z2, edge_index, x_raw, batch, temperature=0.2, hard_weight=3.0, hard_threshold=0.5):
     """
     带困难负样本挖掘的 InfoNCE。
     x_raw: 原始 15 维特征，用于衡量细胞之间的真实生物学差异。
     hard_weight: 困难负样本的惩罚倍数，撕开边界的关键。
     """
-    z1, z2 = F.normalize(z1, dim=1), F.normalize(z2, dim=1)
-    N = z1.size(0)
-    
-    # 1. 基础相似度矩阵
-    sim_matrix = torch.exp(torch.matmul(z1, z2.T) / temperature)
-    pos_sim = torch.diag(sim_matrix)
-    
-    # 2. 空间邻接矩阵
-    spatial_adj = to_dense_adj(edge_index, max_num_nodes=N).squeeze(0)
-    spatial_adj.fill_diagonal_(1.0)
-    
-    # 3. 简单负样本 (空间上离得远的)
-    easy_neg_mask = (spatial_adj == 0).float()
-    easy_neg_sim = (sim_matrix * easy_neg_mask).sum(dim=-1)
-    
-    # 🚀 4. 困难负样本 (Hard Negatives) 挖掘
-    # 计算原始特征的相似度
-    x_norm = F.normalize(x_raw, dim=1)
-    raw_sim = torch.matmul(x_norm, x_norm.T)
-    
-    # 找出真正的空间邻居 (排除自己)
-    neighbors_only = spatial_adj - torch.eye(N, device=z1.device)
-    
-    # 定义困难负样本：是空间邻居，但在 15 维原始特征上差异很大 (余弦相似度 < 0.5)
-    hard_neg_mask = (neighbors_only * (raw_sim < 0.5)).float()
-    
-    # 对困难负样本施加数倍的推斥力 (hard_weight)
-    hard_neg_sim = (sim_matrix * hard_neg_mask * hard_weight).sum(dim=-1)
-    
-    # 5. 计算终极 Loss
-    loss = -torch.log(pos_sim / (pos_sim + easy_neg_sim + hard_neg_sim + 1e-8)).mean()
-    return loss, torch.diag(torch.matmul(z1, z2.T)).mean().item(), 0.0
+    # 处理 batch：把节点嵌入和原始特征转为 (B, M, D) 的 dense 表示，并用 mask 标识有效节点
+    z1 = F.normalize(z1, dim=1)
+    z2 = F.normalize(z2, dim=1)
+
+    z1_b, mask = to_dense_batch(z1, batch)      # (B, M, D), (B, M)
+    z2_b, _ = to_dense_batch(z2, batch)         # (B, M, D)
+    x_b, _ = to_dense_batch(x_raw, batch)       # (B, M, F)
+    adj_b = to_dense_adj(edge_index, batch=batch)  # (B, M, M)
+
+    batch_size, M, D = z1_b.size()
+    total_loss = 0.0
+    total_pos_sim = 0.0
+    total_nodes = 0
+
+    for i in range(batch_size):
+        valid = mask[i].bool()
+        ni = valid.sum().item()
+        if ni == 0:
+            continue
+
+        zi1 = z1_b[i, valid]   # (ni, D)
+        zi2 = z2_b[i, valid]
+        xi = x_b[i, valid]
+        adj = adj_b[i][:ni, :ni]
+        adj.fill_diagonal_(1.0)
+
+        sim = torch.exp(torch.matmul(zi1, zi2.T) / temperature)  # (ni, ni)
+        pos_sim = torch.diag(sim)
+
+        # easy negatives: nodes within same graph but not adjacent
+        easy_neg_mask = (adj == 0).float()
+        easy_neg_sim = (sim * easy_neg_mask).sum(dim=-1)
+
+        # hard negatives: spatial neighbors but raw feature similarity < threshold
+        x_norm = F.normalize(xi, dim=1)
+        raw_sim = torch.matmul(x_norm, x_norm.T)
+        neighbors_only = adj - torch.eye(ni, device=adj.device)
+        hard_neg_mask = (neighbors_only * (raw_sim < hard_threshold)).float()
+        hard_neg_sim = (sim * hard_neg_mask * hard_weight).sum(dim=-1)
+
+        denom = pos_sim + easy_neg_sim + hard_neg_sim + 1e-8
+        loss_i = -torch.log(pos_sim / denom).mean()
+
+        total_loss += loss_i * ni
+        total_pos_sim += pos_sim.mean().item() * ni
+        total_nodes += ni
+
+    if total_nodes == 0:
+        return torch.tensor(0.0, device=z1.device), 0.0, 0.0
+
+    loss = total_loss / total_nodes
+    avg_pos = total_pos_sim / total_nodes
+    return loss, avg_pos, 0.0
 
 def reconstruction_loss(reconstructed_x, original_x):
     return nn.MSELoss()(reconstructed_x, original_x)
@@ -225,9 +246,22 @@ def train(args):
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    model = GCLModel_Morph(in_channels=15, hidden_channels=args.hidden_dim, out_channels=32, n_clusters=args.n_clusters).to(DEVICE)
+    # 动态检测输入维度（可被 --in_dim 覆盖）
+    if args.in_dim is None:
+        # 读取第一个样本以检测 dim
+        sample_pt = full_dataset.file_list[0]
+        tmp = torch.load(sample_pt)
+        in_dim = tmp.x.shape[1]
+        logger.info(f"自动检测到输入维度: {in_dim}")
+    else:
+        in_dim = args.in_dim
+
+    model = GCLModel_Morph(in_channels=in_dim, hidden_channels=args.hidden_dim, out_channels=32, n_clusters=args.n_clusters).to(DEVICE)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     history = {'pre_loss': [], 'fine_loss': []}
+
+    # AMP
+    scaler = torch.cuda.amp.GradScaler(enabled=(DEVICE.type == 'cuda'))
 
     # ---------------------------------------------------------
     # 阶段一：预训练
@@ -238,18 +272,24 @@ def train(args):
         for b_orig, b_corr in train_loader:
             b_orig, b_corr = b_orig.to(DEVICE), b_corr.to(DEVICE)
             optimizer.zero_grad()
-            
-            z1, _, rec_x1, _ = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
-            z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
-            
-            # 🚀 传入原始特征 b_orig.x 用于困难负样本判别
-            loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, temperature=args.temp)
-            loss_rec = reconstruction_loss(rec_x1, b_orig.x)
-            loss = loss_cl + args.lambda_rec * loss_rec
-            
-            loss.backward(); optimizer.step()
+
+            with torch.cuda.amp.autocast(enabled=(DEVICE.type == 'cuda')):
+                z1, _, rec_x1, _ = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
+                z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
+                # 传入 batch 信息到 loss
+                loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, b_orig.batch if hasattr(b_orig, 'batch') else torch.zeros(b_orig.x.size(0), dtype=torch.long, device=b_orig.x.device), temperature=args.temp)
+                loss_rec = reconstruction_loss(rec_x1, b_orig.x)
+                loss = loss_cl + args.lambda_rec * loss_rec
+
+            scaler.scale(loss).backward()
+            # gradient clipping
+            if args.clip > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            scaler.step(optimizer)
+            scaler.update()
             total_loss += loss.item()
-        
+
         avg_loss = total_loss / len(train_loader)
         history['pre_loss'].append(avg_loss)
         if epoch % 5 == 0: logger.info(f"Pre-train Epoch {epoch} | Loss: {avg_loss:.4f}")
@@ -261,7 +301,8 @@ def train(args):
     model.eval(); all_z = []
     with torch.no_grad():
         for b_orig, _ in train_loader:
-            z, _, _, _ = model(b_orig.to(DEVICE).x, b_orig.edge_index, b_orig.edge_attr)
+            b_orig = b_orig.to(DEVICE)
+            z, _, _, _ = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
             all_z.append(z.cpu())
     
     kmeans = KMeans(n_clusters=args.n_clusters, n_init=20, random_state=args.seed)
@@ -279,20 +320,24 @@ def train(args):
         for b_orig, b_corr in train_loader:
             b_orig, b_corr = b_orig.to(DEVICE), b_corr.to(DEVICE)
             optimizer.zero_grad()
-            
-            z1, _, rec_x1, q1 = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
-            z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
-            
-            # 🚀 再次传入原始特征进行对比学习
-            loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, temperature=args.temp)
-            loss_rec = reconstruction_loss(rec_x1, b_orig.x)
-            p1 = target_distribution(q1.detach())
-            loss_dec = F.kl_div(q1.log(), p1, reduction='batchmean')
-            
-            loss = loss_cl + args.lambda_rec * loss_rec + args.lambda_dec * loss_dec
-            loss.backward(); optimizer.step()
+
+            with torch.cuda.amp.autocast(enabled=(DEVICE.type == 'cuda')):
+                z1, _, rec_x1, q1 = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
+                z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
+                loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, b_orig.batch if hasattr(b_orig, 'batch') else torch.zeros(b_orig.x.size(0), dtype=torch.long, device=b_orig.x.device), temperature=args.temp)
+                loss_rec = reconstruction_loss(rec_x1, b_orig.x)
+                p1 = target_distribution(q1.detach())
+                loss_dec = F.kl_div(q1.log(), p1, reduction='batchmean')
+                loss = loss_cl + args.lambda_rec * loss_rec + args.lambda_dec * loss_dec
+
+            scaler.scale(loss).backward()
+            if args.clip > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+            scaler.step(optimizer)
+            scaler.update()
             total_train_loss += loss.item()
-            
+
         avg_train_loss = total_train_loss / len(train_loader)
 
         model.eval(); total_val_loss = 0
@@ -302,7 +347,7 @@ def train(args):
                 z1, _, rec_x1, q1 = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
                 z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
                 
-                v_loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, temperature=args.temp)
+                v_loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, b_orig.batch if hasattr(b_orig, 'batch') else torch.zeros(b_orig.x.size(0), dtype=torch.long, device=b_orig.x.device), temperature=args.temp)
                 v_loss_rec = reconstruction_loss(rec_x1, b_orig.x)
                 p1 = target_distribution(q1)
                 v_loss_dec = F.kl_div(q1.log(), p1, reduction='batchmean')
@@ -314,9 +359,16 @@ def train(args):
         if epoch % 5 == 0:
             logger.info(f"Fine-tune Epoch {epoch} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
+        # 更稳健的 checkpoint 保存：包含优化器、scaler、epoch
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            torch.save(model.state_dict(), os.path.join(args.save_dir, "best_model.pth"))
+            ckpt = {
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'epoch': epoch,
+                'scaler': scaler.state_dict()
+            }
+            torch.save(ckpt, os.path.join(args.save_dir, "best_model.pth"))
             patience_counter = 0 
         else:
             patience_counter += 1
@@ -340,6 +392,8 @@ if __name__ == "__main__":
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--gpu", type=str, default="5")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--hard_weight", type=float, default=1.5, help="困难负样本的排斥权重")
+    parser.add_argument("--hard_threshold", type=float, default=0.3, help="定义困难负样本的余弦距离阈值")
     
     # 轮次设置 (这里已经为你设好了较高的容忍度)
     parser.add_argument("--pretrain_epochs", type=int, default=100)
@@ -351,9 +405,13 @@ if __name__ == "__main__":
     parser.add_argument("--patience", type=int, default=100)
     
     # 核心模块开关参数
-    parser.add_argument("--n_clusters", type=int, default=4)
+    parser.add_argument("--n_clusters", type=int, default=8)
     parser.add_argument("--lambda_rec", type=float, default=1.0)
     parser.add_argument("--lambda_dec", type=float, default=1.0)
+    parser.add_argument("--clip", type=float, default=1.0, help="Max grad norm for gradient clipping (0 to disable)")
+    parser.add_argument("--in_dim", type=int, default=None, help="If set, forces model input dim instead of auto-detect")
 
     args = parser.parse_args()
+    # ensure save dir exists
+    if not os.path.exists(args.save_dir): os.makedirs(args.save_dir, exist_ok=True)
     train(args)

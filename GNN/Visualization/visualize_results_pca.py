@@ -20,17 +20,39 @@ for path in [gnn_dir, project_root]:
         sys.path.insert(0, path)
 # =================================================
 
-# 导入最新版的双 Loss 模型框架
+def map_predict_to_gt(gt_labels, pred_labels):
+    """
+    将高维预测簇 (如 8 类) 映射到低维 Ground Truth 标签上 (如 4 类)
+    逻辑：看这个预测出来的簇里，哪种真实的标签最多，就把它归为哪一类。
+    """
+    df = pd.DataFrame({'gt': gt_labels, 'pred': pred_labels})
+    mapping = {}
+    for cluster in df['pred'].unique():
+        # 找到该预测簇中，占比最高的真实标签
+        majority_gt = df[df['pred'] == cluster]['gt'].mode()[0]
+        mapping[cluster] = majority_gt
+        
+    print(f"[-] 自动亚群合并字典: {mapping}")
+    return df['pred'].map(mapping).values
+
+# 导入最新版的双 Loss + DEC 模型框架
 from train import GCLModel_Morph
 
-def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim, save_name="comparison.png"):
+def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim, n_clusters=8, save_name="comparison.png"):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # ================= 1. 加载模型与特征 =================
     print(f"[-] 正在从 {model_path} 加载模型权重...")
-    # 注意：这里的隐藏层维度要和你在新 train.py 里训练时设置的保持一致
-    model = GCLModel_Morph(in_channels=15, hidden_channels=hidden_dim, out_channels=out_dim).to(DEVICE)
-    model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+    
+    # 🌟 n_clusters 这里一定要传入你训练时设定的 8
+    model = GCLModel_Morph(in_channels=15, hidden_channels=hidden_dim, out_channels=out_dim, n_clusters=n_clusters).to(DEVICE)
+    
+    checkpoint = torch.load(model_path, map_location=DEVICE)
+    if 'model' in checkpoint:
+        model.load_state_dict(checkpoint['model'])
+    else:
+        model.load_state_dict(checkpoint)
+        
     model.eval()
     
     print("[-] 正在提取 MorphGAT 图节点嵌入 (Embeddings)...")
@@ -63,32 +85,37 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
     
     merged = pd.merge(coord_df, truth_full[['ID', x_col, y_col, 'annot_type']], left_on='barcode', right_on='ID', how='inner')
     merged = merged.rename(columns={x_col: 'x', y_col: 'y'}) 
-    n_clusters = len(np.unique(merged['annot_type']))
     
     # ================= 4. 计算不同特征的聚类 ARI =================
     print(f"\n[-] 开始执行 K-Means 聚类 (K={n_clusters})...")
+    # 🌟 这里的 K 必须是你设定的 8 (n_clusters)，而不是 GT 的 4 类
     kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
 
-    # 4.1 MorphGAT 聚类
+    # 4.1 MorphGAT 聚类与映射
     aligned_emb_gnn = embeddings_gnn[merged['idx'].values]
-    merged['pred_gnn'] = kmeans.fit_predict(aligned_emb_gnn)
-    ari_gnn = adjusted_rand_score(merged['annot_type'], merged['pred_gnn'])
+    merged['pred_gnn_raw'] = kmeans.fit_predict(aligned_emb_gnn)
+    
+    # 🌟 关键映射步骤：把跑出来的 8 个簇，映射回真实的标签文字
+    merged['pred_gnn_mapped'] = map_predict_to_gt(merged['annot_type'], merged['pred_gnn_raw'])
+    ari_gnn = adjusted_rand_score(merged['annot_type'], merged['pred_gnn_mapped'])
 
-    # 4.2 纯基因表达聚类 (PCA 降维)
-    print("[-] 正在计算纯基因表达 (PCA-50) 聚类...")
+    # 4.2 纯基因表达聚类 (为了公平，基线也要过一遍相同的映射逻辑)
+    print("[-] 正在计算纯基因表达 (PCA-50) 聚类与映射...")
     raw_X = adata.X
     if sp.issparse(raw_X):
         raw_X = raw_X.toarray()
     aligned_genes = raw_X[merged['idx'].values]
     
-    # 降维加速并去噪
     pca = PCA(n_components=50, random_state=42)
     aligned_genes_pca = pca.fit_transform(aligned_genes)
-    merged['pred_genes'] = kmeans.fit_predict(aligned_genes_pca)
-    ari_genes = adjusted_rand_score(merged['annot_type'], merged['pred_genes'])
+    merged['pred_genes_raw'] = kmeans.fit_predict(aligned_genes_pca)
+    
+    # 基线映射
+    merged['pred_genes_mapped'] = map_predict_to_gt(merged['annot_type'], merged['pred_genes_raw'])
+    ari_genes = adjusted_rand_score(merged['annot_type'], merged['pred_genes_mapped'])
 
     print("\n" + "="*40)
-    print(f"📊 ARI 对比报告")
+    print(f"📊 映射后 ARI 对比报告 (Over-clustering to Mapping)")
     print(f"🧬 纯基因表达 (PCA): {ari_genes:.4f}")
     print(f"🔥 MorphGAT (GNN)  : {ari_gnn:.4f}")
     print("="*40 + "\n")
@@ -107,17 +134,19 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
     ax1.scatter(merged['x'], merged['y'], c=colors_true, cmap='Set1', s=30, edgecolor='none', alpha=0.9)
     ax1.set_title("Ground Truth (Manual Annotation)", fontsize=18, pad=15)
     ax1.set_aspect('equal')
-    ax1.axis('off') # 去掉边框更清爽
+    ax1.axis('off') 
 
-    # 纯基因预测图
-    ax2.scatter(merged['x'], merged['y'], c=merged['pred_genes'], cmap='Set1', s=30, edgecolor='none', alpha=0.9)
-    ax2.set_title(f"Pure Gene Expression (ARI: {ari_genes:.4f})", fontsize=18, pad=15)
+    # 纯基因预测图 (使用映射后的颜色，保证和真实图颜色对应)
+    colors_genes_mapped = [type_to_color[t] for t in merged['pred_genes_mapped']]
+    ax2.scatter(merged['x'], merged['y'], c=colors_genes_mapped, cmap='Set1', s=30, edgecolor='none', alpha=0.9)
+    ax2.set_title(f"Pure Gene (K={n_clusters}->Mapped) ARI: {ari_genes:.4f}", fontsize=18, pad=15)
     ax2.set_aspect('equal')
     ax2.axis('off')
 
-    # MorphGAT 预测图
-    ax3.scatter(merged['x'], merged['y'], c=merged['pred_gnn'], cmap='Set1', s=30, edgecolor='none', alpha=0.9)
-    ax3.set_title(f"MorphGAT Prediction (ARI: {ari_gnn:.4f})", fontsize=18, pad=15)
+    # MorphGAT 预测图 (使用映射后的颜色)
+    colors_gnn_mapped = [type_to_color[t] for t in merged['pred_gnn_mapped']]
+    ax3.scatter(merged['x'], merged['y'], c=colors_gnn_mapped, cmap='Set1', s=30, edgecolor='none', alpha=0.9)
+    ax3.set_title(f"MorphGAT (K={n_clusters}->Mapped) ARI: {ari_gnn:.4f}", fontsize=18, pad=15)
     ax3.set_aspect('equal')
     ax3.axis('off')
 
@@ -131,8 +160,9 @@ if __name__ == "__main__":
         "expr_path": os.path.join(project_root, "DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/filtered_feature_bc_matrix.h5"),
         "truth_path": os.path.join(project_root, "DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/metadata.txt"),
         "model_path": os.path.join(project_root, "GNN/checkpoints/best_model.pth"),
-        "hidden_dim": 32, # 记得确认和训练脚本的参数一致
+        "hidden_dim": 32,
         "out_dim": 32,
+        "n_clusters": 8, # 🌟 核心修改点：这里必须改成 8！
         "save_name": os.path.join(current_dir, "breast_cancer_comparison.png")
     }
 
