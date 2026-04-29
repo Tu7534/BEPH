@@ -45,7 +45,7 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
     print(f"[-] 正在从 {model_path} 加载模型权重...")
     
     # 🌟 n_clusters 这里一定要传入你训练时设定的 8
-    model = GCLModel_Morph(in_channels=15, hidden_channels=hidden_dim, out_channels=out_dim, n_clusters=n_clusters).to(DEVICE)
+    model = GCLModel_Morph(in_channels=233, hidden_channels=hidden_dim, out_channels=out_dim, n_clusters=n_clusters).to(DEVICE)
     
     checkpoint = torch.load(model_path, map_location=DEVICE)
     if 'model' in checkpoint:
@@ -101,13 +101,11 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
 
     # 4.2 纯基因表达聚类 (为了公平，基线也要过一遍相同的映射逻辑)
     print("[-] 正在计算纯基因表达 (PCA-50) 聚类与映射...")
-    raw_X = adata.X
-    if sp.issparse(raw_X):
-        raw_X = raw_X.toarray()
-    aligned_genes = raw_X[merged['idx'].values]
-    
-    pca = PCA(n_components=50, random_state=42)
-    aligned_genes_pca = pca.fit_transform(aligned_genes)
+    adata_aligned = adata[merged['idx'].values].copy()
+    sc.pp.normalize_total(adata_aligned, target_sum=1e4) # 跑 PCA 前必须做基础的归一化，不然准确率会极低！
+    sc.pp.log1p(adata_aligned)
+    sc.tl.pca(adata_aligned, n_comps=50, random_state=42)
+    aligned_genes_pca = adata_aligned.obsm['X_pca']
     merged['pred_genes_raw'] = kmeans.fit_predict(aligned_genes_pca)
     
     # 基线映射
@@ -131,7 +129,7 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
     colors_true = [type_to_color[t] for t in merged['annot_type']]
     
     # 真实图
-    ax1.scatter(merged['x'], merged['y'], c=colors_true, cmap='Set1', s=30, edgecolor='none', alpha=0.9)
+    ax1.scatter(merged['x'], merged['y'], c=colors_true, cmap='Set1', s=15, edgecolor='none', alpha=0.9)
     ax1.set_title("Ground Truth (Manual Annotation)", fontsize=18, pad=15)
     ax1.set_aspect('equal')
     ax1.axis('off') 
@@ -160,7 +158,7 @@ if __name__ == "__main__":
         "expr_path": os.path.join(project_root, "DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/filtered_feature_bc_matrix.h5"),
         "truth_path": os.path.join(project_root, "DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/metadata.txt"),
         "model_path": os.path.join(project_root, "GNN/checkpoints/best_model.pth"),
-        "hidden_dim": 32,
+        "hidden_dim": 128,
         "out_dim": 32,
         "n_clusters": 8, # 🌟 核心修改点：这里必须改成 8！
         "save_name": os.path.join(current_dir, "breast_cancer_comparison.png")
