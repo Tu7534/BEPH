@@ -1,1 +1,1 @@
-from .train import GCLModel_Morph
+from .train_1 import GCLModel_Morph

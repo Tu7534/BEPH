@@ -2,7 +2,56 @@ import os
 import glob
 import torch
 from torch_geometric.data import Dataset
-from GNN.corrupted_graph import MorphologicalDropEdge
+import torch
+from torch_geometric.data import Data
+from torch_geometric.utils import to_undirected
+
+
+class MorphologicalDropEdge(object):
+    def __init__(self, p_overall=0.4):
+        self.p_overall = p_overall
+
+    def __call__(self, data: Data) -> Data:
+        aug_data = data.clone()
+        if aug_data.edge_attr is None:
+            return aug_data
+        edge_attr = aug_data.edge_attr.squeeze()
+        edge_index = aug_data.edge_index
+
+        row, col = edge_index
+        mask_upper = row <= col
+
+        w_upper = edge_attr[mask_upper]
+        row_upper = row[mask_upper]
+        col_upper = col[mask_upper]
+
+        w_min = edge_attr.min()
+        w_max = edge_attr.max()
+        if w_max - w_min < 1e-6:
+            s_ij = w_upper
+        else:
+            s_ij = (w_upper - w_min) / (w_max - w_min)
+
+        p_drop = self.p_overall * (1.0 - s_ij)
+        p_drop = torch.clamp(p_drop, min=0.0, max=1.0)
+
+        p_keep = 1.0 - p_drop
+        keep_mask = torch.bernoulli(p_keep).to(torch.bool)
+
+        kept_row = row_upper[keep_mask]
+        kept_col = col_upper[keep_mask]
+        kept_attr = w_upper[keep_mask]
+        kept_edge_index = torch.stack([kept_row, kept_col], dim=0)
+
+        new_edge_index, new_edge_attr = to_undirected(
+            kept_edge_index,
+            kept_attr,
+            num_nodes=data.num_nodes
+        )
+
+        aug_data.edge_index = new_edge_index
+        aug_data.edge_attr = new_edge_attr
+        return aug_data
 
 
 def apply_feature_masking(x, drop_prob=0.2):
