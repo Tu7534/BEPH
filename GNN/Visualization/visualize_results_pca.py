@@ -38,7 +38,7 @@ def map_predict_to_gt(gt_labels, pred_labels):
 # 导入最新版的双 Loss + DEC 模型框架
 from train import GCLModel_Morph
 
-def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim, n_clusters=8, save_name="comparison.png"):
+def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_dim, out_dim, n_clusters=4, save_name="comparison.png"):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # ================= 1. 加载模型与特征 =================
@@ -89,7 +89,7 @@ def plot_spatial_comparison(pt_path, expr_path, model_path, truth_path, hidden_d
     # ================= 4. 计算不同特征的聚类 ARI =================
     print(f"\n[-] 开始执行 K-Means 聚类 (K={n_clusters})...")
     # 🌟 这里的 K 必须是你设定的 8 (n_clusters)，而不是 GT 的 4 类
-    kmeans = KMeans(n_clusters=n_clusters, n_init=20, random_state=42)
+    kmeans = KMeans(n_clusters=8, n_init=20, random_state=42)
 
     # 4.1 MorphGAT 聚类与映射
     aligned_emb_gnn = embeddings_gnn[merged['idx'].values]
@@ -160,7 +160,7 @@ if __name__ == "__main__":
         "model_path": os.path.join(project_root, "GNN/checkpoints/best_model.pth"),
         "hidden_dim": 128,
         "out_dim": 32,
-        "n_clusters": 8, # 🌟 核心修改点：这里必须改成 8！
+        "n_clusters": 4, # 🌟 核心修改点：这里必须改成 8！
         "save_name": os.path.join(current_dir, "breast_cancer_comparison.png")
     }
 

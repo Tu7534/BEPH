@@ -1,12 +1,13 @@
 """
 ================================================================================
-脚本名称: 模型框架搭建.py (MorphGAT - Hard Negative & Raw Residual Edition)
+脚本名称: train.py (MorphGAT - 泛癌微环境 233 维专版)
 级别: 工业级标准 (Production-Ready)
 功能描述:
-【究极升级版】：
-1. GNN 架构升级：引入 "跨维度原始特征残差连接" (Raw Feature Residuals)，抵抗过度同化。
-2. Loss 架构升级：在 Spatial InfoNCE 中加入 "困难负样本挖掘" (Hard Negative Mining)，锐化空间边界。
-3. 继承模块：DEC 端到端聚类、特征重建损失、特征掩码。
+【泛癌终极版】：
+1. 动态维度自适应：自动识别 233 维输入特征。
+2. GNN 架构升级：引入 "跨维度原始特征残差连接" (Raw Feature Residuals)，抵抗过度同化。
+3. Loss 架构升级：在 Spatial InfoNCE 中加入 "困难负样本挖掘" (Hard Negative Mining)，锐化空间边界。
+4. 继承模块：DEC 端到端聚类、特征重建损失、特征掩码。
 ================================================================================
 """
 
@@ -66,10 +67,12 @@ class ContrastiveGraphDataset(Dataset):
         super().__init__(root_dir, transform, pre_transform)
 
     def len(self): return len(self.file_list)
+    
     def get(self, idx):
         data_orig = torch.load(self.file_list[idx])
-        if data_orig.x.shape[1] != 15:
-            raise ValueError(f"\n❌ 发现脏数据！\n文件: {self.file_list[idx]}\n节点特征不是 15 维！")
+        # 🌟 修复：移除硬编码的 15 维限制，改为动态判断是否为空
+        if data_orig.x.shape[1] < 2:
+            raise ValueError(f"\n❌ 发现脏数据！文件: {self.file_list[idx]}\n节点特征维度异常: {data_orig.x.shape[1]}")
         
         data_corr = self.augmentor(data_orig)
         data_orig.x = apply_feature_masking(data_orig.x, drop_prob=0.1)
@@ -110,12 +113,12 @@ class MorphGATConv(MessagePassing):
         return x_j * F.dropout(alpha, p=self.dropout, training=self.training).unsqueeze(-1)
 
 class GCLModel_Morph(nn.Module):
-    def __init__(self, in_channels=15, hidden_channels=128, out_channels=32, n_clusters=4):
+    def __init__(self, in_channels=233, hidden_channels=128, out_channels=32, n_clusters=8):
         super().__init__()
         
         self.feature_proj = nn.Sequential(
-            nn.Linear(in_channels, 64), nn.LayerNorm(64), nn.GELU(),
-            nn.Linear(64, hidden_channels), nn.LayerNorm(hidden_channels), nn.GELU()
+            nn.Linear(in_channels, hidden_channels), nn.LayerNorm(hidden_channels), nn.GELU(),
+            nn.Linear(hidden_channels, hidden_channels), nn.LayerNorm(hidden_channels), nn.GELU()
         )
         
         self.heads1 = 4 
@@ -140,7 +143,7 @@ class GCLModel_Morph(nn.Module):
         zeros(self.cluster_centers)
 
     def forward(self, x, edge_index, edge_attr):
-        x_raw = x.clone() # 🚀 保留最纯净的 15 维生物学特征
+        x_raw = x.clone() # 🚀 保留最纯净的生物学特征 (233维)
         
         x = self.feature_proj(x)
         x_in = x  
@@ -171,10 +174,9 @@ def target_distribution(q):
 def spatial_contrastive_loss(z1, z2, edge_index, x_raw, batch, temperature=0.2, hard_weight=3.0, hard_threshold=0.5):
     """
     带困难负样本挖掘的 InfoNCE。
-    x_raw: 原始 15 维特征，用于衡量细胞之间的真实生物学差异。
+    x_raw: 原始特征，用于衡量细胞之间的真实生物学差异。
     hard_weight: 困难负样本的惩罚倍数，撕开边界的关键。
     """
-    # 处理 batch：把节点嵌入和原始特征转为 (B, M, D) 的 dense 表示，并用 mask 标识有效节点
     z1 = F.normalize(z1, dim=1)
     z2 = F.normalize(z2, dim=1)
 
@@ -238,21 +240,22 @@ def train(args):
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     set_seed(args.seed); logger = setup_logger(args.save_dir)
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    logger.info(f"🚀 初始化终极训练任务 (HardNeg + Residual) | Device: {DEVICE}")
+    logger.info(f"🚀 初始化泛癌训练任务 (HardNeg + Residual) | Device: {DEVICE}")
 
     full_dataset = ContrastiveGraphDataset(args.data_dir, p_overall=0.5)
+    logger.info(f"📊 成功载入 {len(full_dataset)} 个样本数据。")
+    
     train_size = int(0.8 * len(full_dataset))
     train_ds, val_ds = random_split(full_dataset, [train_size, len(full_dataset) - train_size])
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False)
 
-    # 动态检测输入维度（可被 --in_dim 覆盖）
+    # 动态检测输入维度
     if args.in_dim is None:
-        # 读取第一个样本以检测 dim
         sample_pt = full_dataset.file_list[0]
         tmp = torch.load(sample_pt)
         in_dim = tmp.x.shape[1]
-        logger.info(f"自动检测到输入维度: {in_dim}")
+        logger.info(f"✅ 自动检测到输入维度: {in_dim}")
     else:
         in_dim = args.in_dim
 
@@ -276,13 +279,11 @@ def train(args):
             with torch.cuda.amp.autocast(enabled=(DEVICE.type == 'cuda')):
                 z1, _, rec_x1, _ = model(b_orig.x, b_orig.edge_index, b_orig.edge_attr)
                 z2, _, _, _ = model(b_corr.x, b_corr.edge_index, b_corr.edge_attr)
-                # 传入 batch 信息到 loss
                 loss_cl, _, _ = spatial_contrastive_loss(z1, z2, b_orig.edge_index, b_orig.x, b_orig.batch if hasattr(b_orig, 'batch') else torch.zeros(b_orig.x.size(0), dtype=torch.long, device=b_orig.x.device), temperature=args.temp)
                 loss_rec = reconstruction_loss(rec_x1, b_orig.x)
                 loss = loss_cl + args.lambda_rec * loss_rec
 
             scaler.scale(loss).backward()
-            # gradient clipping
             if args.clip > 0:
                 scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
@@ -353,13 +354,13 @@ def train(args):
                 v_loss_dec = F.kl_div(q1.log(), p1, reduction='batchmean')
                 total_val_loss += (v_loss_cl + args.lambda_rec * v_loss_rec + args.lambda_dec * v_loss_dec).item()
                 
-        avg_val_loss = total_val_loss / len(val_loader)
+        avg_val_loss = total_val_loss / len(val_loader) if len(val_loader) > 0 else avg_train_loss # 防止验证集为空
         history['fine_loss'].append(avg_val_loss)
         
         if epoch % 5 == 0:
             logger.info(f"Fine-tune Epoch {epoch} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
 
-        # 更稳健的 checkpoint 保存：包含优化器、scaler、epoch
+        # 保存权重
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
             ckpt = {
@@ -381,37 +382,40 @@ def train(args):
     plt.plot(range(len(history['pre_loss'])), history['pre_loss'], label='Phase 1: Pre-train Loss')
     offset = len(history['pre_loss'])
     plt.plot(range(offset, offset + len(history['fine_loss'])), history['fine_loss'], label='Phase 3: Fine-tune Val Loss')
-    plt.title('Training Loss Pipeline (Hard Negatives)')
+    plt.title('Training Loss Pipeline (Pan-Cancer Hard Negatives)')
     plt.legend(); plt.grid(True)
     plt.savefig(os.path.join(args.save_dir, 'training_pipeline.png'), dpi=300)
-    logger.info("✅ 训练完成，模型已保存。")
+    logger.info("✅ 训练完成，最佳模型已保存。")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MorphGAT Industrial Pipeline")
+    parser = argparse.ArgumentParser(description="MorphGAT Pan-Cancer Pipeline")
     parser.add_argument("--data_dir", type=str, default="/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Graph_pt/")
     parser.add_argument("--save_dir", type=str, default="checkpoints")
     parser.add_argument("--gpu", type=str, default="5")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--hard_weight", type=float, default=1.5, help="困难负样本的排斥权重")
-    parser.add_argument("--hard_threshold", type=float, default=0.3, help="定义困难负样本的余弦距离阈值")
+    parser.add_argument("--hard_weight", type=float, default=1.5)
+    parser.add_argument("--hard_threshold", type=float, default=0.3)
     
-    # 轮次设置 (这里已经为你设好了较高的容忍度)
-    parser.add_argument("--pretrain_epochs", type=int, default=100)
-    parser.add_argument("--epochs", type=int, default=400)
-    parser.add_argument("--batch_size", type=int, default=8)
+    # 🌟 提高预训练轮次以充分吸收 233 维复杂特征
+    parser.add_argument("--pretrain_epochs", type=int, default=150)
+    parser.add_argument("--epochs", type=int, default=500)
+    
+    # 🌟 调整 Batch Size 适配多样本
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--temp", type=float, default=0.5)
-    parser.add_argument("--hidden_dim", type=int, default=32)
-    parser.add_argument("--patience", type=int, default=100)
     
-    # 核心模块开关参数
+    # 🌟 扩大隐藏层维度
+    parser.add_argument("--hidden_dim", type=int, default=128)
+    parser.add_argument("--patience", type=int, default=150)
+    
+    # 聚类数默认 8
     parser.add_argument("--n_clusters", type=int, default=8)
     parser.add_argument("--lambda_rec", type=float, default=1.0)
     parser.add_argument("--lambda_dec", type=float, default=1.0)
-    parser.add_argument("--clip", type=float, default=1.0, help="Max grad norm for gradient clipping (0 to disable)")
-    parser.add_argument("--in_dim", type=int, default=None, help="If set, forces model input dim instead of auto-detect")
+    parser.add_argument("--clip", type=float, default=1.0)
+    parser.add_argument("--in_dim", type=int, default=None)
 
     args = parser.parse_args()
-    # ensure save dir exists
     if not os.path.exists(args.save_dir): os.makedirs(args.save_dir, exist_ok=True)
     train(args)
