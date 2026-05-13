@@ -16,7 +16,7 @@ gnn_dir = os.path.dirname(current_dir)
 if gnn_dir not in sys.path: sys.path.insert(0, gnn_dir)
 
 # 导入底层图卷积基础组件
-from GNN.breast_1.train_1 import MorphGATConv
+from train_2 import MorphGATConv
 
 # ================= 🛡️ 架构解耦区 =================
 # 显式重写最新的极限版 GCLModel_Morph，确保完美接纳带 LayerNorm 的新权重
@@ -81,7 +81,7 @@ class GCLModel_Morph(nn.Module):
 def generate_paper_figures():
     sample_root = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/"
     pt_path = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Human Breast Cancer (Block A Section 1)/breast_cancer.pt"
-    model_path = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/GNN/checkpoints_3/best_model.pth"
+    model_path = "/data/home/wangzz_group/zhaipengyuan/BEPH-main/GNN/breast_2/checkpoints_2/best_model.pth"
     metadata_path = os.path.join(sample_root, "metadata.txt")
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

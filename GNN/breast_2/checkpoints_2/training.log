@@ -1,0 +1,137 @@
+[2026-05-11 10:39:15] [INFO] 🚀 初始化泛癌训练任务 (Multi-Positive + AdamW + Schedulers) | Device: cuda
+[2026-05-11 10:39:15] [INFO] 📊 成功载入 130 个样本数据。
+[2026-05-11 10:39:15] [INFO] ✅ 自动检测到输入维度: 233
+[2026-05-11 10:39:15] [INFO] 🔥 Phase 1: 预训练特征 (150 Epochs)...
+[2026-05-11 10:39:18] [INFO] Pre-train Epoch 000 | LR: 0.000016 | Loss: 8.4083
+[2026-05-11 10:39:28] [INFO] Pre-train Epoch 005 | LR: 0.000046 | Loss: 7.6161
+[2026-05-11 10:39:38] [INFO] Pre-train Epoch 010 | LR: 0.000076 | Loss: 6.6376
+[2026-05-11 10:39:49] [INFO] Pre-train Epoch 015 | LR: 0.000100 | Loss: 6.0811
+[2026-05-11 10:39:59] [INFO] Pre-train Epoch 020 | LR: 0.000100 | Loss: 5.7566
+[2026-05-11 10:40:11] [INFO] Pre-train Epoch 025 | LR: 0.000098 | Loss: 5.5959
+[2026-05-11 10:40:21] [INFO] Pre-train Epoch 030 | LR: 0.000097 | Loss: 5.5222
+[2026-05-11 10:40:31] [INFO] Pre-train Epoch 035 | LR: 0.000094 | Loss: 5.4324
+[2026-05-11 10:40:41] [INFO] Pre-train Epoch 040 | LR: 0.000091 | Loss: 5.3623
+[2026-05-11 10:40:52] [INFO] Pre-train Epoch 045 | LR: 0.000088 | Loss: 5.3165
+[2026-05-11 10:41:03] [INFO] Pre-train Epoch 050 | LR: 0.000083 | Loss: 5.2903
+[2026-05-11 10:41:14] [INFO] Pre-train Epoch 055 | LR: 0.000079 | Loss: 5.2492
+[2026-05-11 10:41:25] [INFO] Pre-train Epoch 060 | LR: 0.000074 | Loss: 5.2130
+[2026-05-11 10:41:36] [INFO] Pre-train Epoch 065 | LR: 0.000069 | Loss: 5.2036
+[2026-05-11 10:41:46] [INFO] Pre-train Epoch 070 | LR: 0.000063 | Loss: 5.1549
+[2026-05-11 10:41:57] [INFO] Pre-train Epoch 075 | LR: 0.000058 | Loss: 5.1269
+[2026-05-11 10:42:07] [INFO] Pre-train Epoch 080 | LR: 0.000052 | Loss: 5.1224
+[2026-05-11 10:42:19] [INFO] Pre-train Epoch 085 | LR: 0.000046 | Loss: 5.1285
+[2026-05-11 10:42:29] [INFO] Pre-train Epoch 090 | LR: 0.000040 | Loss: 5.1050
+[2026-05-11 10:42:40] [INFO] Pre-train Epoch 095 | LR: 0.000035 | Loss: 5.1055
+[2026-05-11 10:42:51] [INFO] Pre-train Epoch 100 | LR: 0.000029 | Loss: 5.0883
+[2026-05-11 10:43:02] [INFO] Pre-train Epoch 105 | LR: 0.000024 | Loss: 5.0692
+[2026-05-11 10:43:12] [INFO] Pre-train Epoch 110 | LR: 0.000019 | Loss: 5.0548
+[2026-05-11 10:43:22] [INFO] Pre-train Epoch 115 | LR: 0.000015 | Loss: 5.0824
+[2026-05-11 10:43:32] [INFO] Pre-train Epoch 120 | LR: 0.000011 | Loss: 5.0680
+[2026-05-11 10:43:43] [INFO] Pre-train Epoch 125 | LR: 0.000008 | Loss: 5.0190
+[2026-05-11 10:43:53] [INFO] Pre-train Epoch 130 | LR: 0.000005 | Loss: 5.0566
+[2026-05-11 10:44:00] [INFO] Pre-train Epoch 135 | LR: 0.000003 | Loss: 5.0716
+[2026-05-11 10:44:09] [INFO] Pre-train Epoch 140 | LR: 0.000001 | Loss: 5.0551
+[2026-05-11 10:44:21] [INFO] Pre-train Epoch 145 | LR: 0.000000 | Loss: 5.0610
+[2026-05-11 10:44:29] [INFO] 🎯 Phase 2: 使用 KMeans 初始化 DEC 聚类中心...
+[2026-05-11 10:44:49] [INFO] 🚀 Phase 3: 联合微调 (500 Epochs)...
+[2026-05-11 10:44:51] [INFO] Fine-tune Epoch 000 | Train Loss: 5.0657 | Val Loss: 5.3523
+[2026-05-11 10:45:06] [INFO] Fine-tune Epoch 005 | Train Loss: 5.0428 | Val Loss: 5.3444
+[2026-05-11 10:45:20] [INFO] Fine-tune Epoch 010 | Train Loss: 5.0491 | Val Loss: 5.3435
+[2026-05-11 10:45:34] [INFO] Fine-tune Epoch 015 | Train Loss: 5.0010 | Val Loss: 5.3297
+[2026-05-11 10:45:48] [INFO] Fine-tune Epoch 020 | Train Loss: 5.0061 | Val Loss: 5.3177
+[2026-05-11 10:46:01] [INFO] Fine-tune Epoch 025 | Train Loss: 5.0215 | Val Loss: 5.3216
+[2026-05-11 10:46:15] [INFO] Fine-tune Epoch 030 | Train Loss: 5.0030 | Val Loss: 5.3186
+[2026-05-11 10:46:28] [INFO] Fine-tune Epoch 035 | Train Loss: 4.9817 | Val Loss: 5.3205
+[2026-05-11 10:46:41] [INFO] Fine-tune Epoch 040 | Train Loss: 4.9495 | Val Loss: 5.3238
+[2026-05-11 10:46:55] [INFO] Fine-tune Epoch 045 | Train Loss: 4.9791 | Val Loss: 5.3077
+[2026-05-11 10:47:08] [INFO] Fine-tune Epoch 050 | Train Loss: 4.9826 | Val Loss: 5.3033
+[2026-05-11 10:47:21] [INFO] Fine-tune Epoch 055 | Train Loss: 4.9390 | Val Loss: 5.3057
+[2026-05-11 10:47:35] [INFO] Fine-tune Epoch 060 | Train Loss: 4.9699 | Val Loss: 5.2952
+[2026-05-11 10:47:48] [INFO] Fine-tune Epoch 065 | Train Loss: 4.9611 | Val Loss: 5.2963
+[2026-05-11 10:48:01] [INFO] Fine-tune Epoch 070 | Train Loss: 4.9479 | Val Loss: 5.2858
+[2026-05-11 10:48:16] [INFO] Fine-tune Epoch 075 | Train Loss: 4.9035 | Val Loss: 5.2888
+[2026-05-11 10:48:29] [INFO] Fine-tune Epoch 080 | Train Loss: 4.9292 | Val Loss: 5.2777
+[2026-05-11 10:48:43] [INFO] Fine-tune Epoch 085 | Train Loss: 4.9300 | Val Loss: 5.2806
+[2026-05-11 10:48:57] [INFO] Fine-tune Epoch 090 | Train Loss: 4.9219 | Val Loss: 5.2860
+[2026-05-11 10:49:11] [INFO] Fine-tune Epoch 095 | Train Loss: 4.9012 | Val Loss: 5.2738
+[2026-05-11 10:49:24] [INFO] Fine-tune Epoch 100 | Train Loss: 4.9016 | Val Loss: 5.2712
+[2026-05-11 10:49:36] [INFO] Fine-tune Epoch 105 | Train Loss: 4.9136 | Val Loss: 5.2667
+[2026-05-11 10:49:49] [INFO] Fine-tune Epoch 110 | Train Loss: 4.9095 | Val Loss: 5.2589
+[2026-05-11 10:50:03] [INFO] Fine-tune Epoch 115 | Train Loss: 4.9060 | Val Loss: 5.2556
+[2026-05-11 10:50:18] [INFO] Fine-tune Epoch 120 | Train Loss: 4.9015 | Val Loss: 5.2524
+[2026-05-11 10:50:31] [INFO] Fine-tune Epoch 125 | Train Loss: 4.8913 | Val Loss: 5.2571
+[2026-05-11 10:50:43] [INFO] Fine-tune Epoch 130 | Train Loss: 4.8843 | Val Loss: 5.2455
+[2026-05-11 10:50:56] [INFO] Fine-tune Epoch 135 | Train Loss: 4.8879 | Val Loss: 5.2493
+[2026-05-11 10:51:10] [INFO] Fine-tune Epoch 140 | Train Loss: 4.8842 | Val Loss: 5.2451
+[2026-05-11 10:51:24] [INFO] Fine-tune Epoch 145 | Train Loss: 4.8760 | Val Loss: 5.2421
+[2026-05-11 10:51:39] [INFO] Fine-tune Epoch 150 | Train Loss: 4.8421 | Val Loss: 5.2486
+[2026-05-11 10:51:54] [INFO] Fine-tune Epoch 155 | Train Loss: 4.8510 | Val Loss: 5.2366
+[2026-05-11 10:52:08] [INFO] Fine-tune Epoch 160 | Train Loss: 4.8713 | Val Loss: 5.2446
+[2026-05-11 10:52:22] [INFO] Fine-tune Epoch 165 | Train Loss: 4.8638 | Val Loss: 5.2316
+[2026-05-11 10:52:35] [INFO] Fine-tune Epoch 170 | Train Loss: 4.8493 | Val Loss: 5.2385
+[2026-05-11 10:52:48] [INFO] Fine-tune Epoch 175 | Train Loss: 4.8497 | Val Loss: 5.2318
+[2026-05-11 10:53:01] [INFO] Fine-tune Epoch 180 | Train Loss: 4.8403 | Val Loss: 5.2309
+[2026-05-11 10:53:14] [INFO] Fine-tune Epoch 185 | Train Loss: 4.8591 | Val Loss: 5.2402
+[2026-05-11 10:53:28] [INFO] Fine-tune Epoch 190 | Train Loss: 4.8432 | Val Loss: 5.2336
+[2026-05-11 10:53:41] [INFO] Fine-tune Epoch 195 | Train Loss: 4.8362 | Val Loss: 5.2241
+[2026-05-11 10:53:55] [INFO] Fine-tune Epoch 200 | Train Loss: 4.8309 | Val Loss: 5.2313
+[2026-05-11 10:54:08] [INFO] Fine-tune Epoch 205 | Train Loss: 4.8479 | Val Loss: 5.2319
+[2026-05-11 10:54:22] [INFO] Fine-tune Epoch 210 | Train Loss: 4.8163 | Val Loss: 5.2214
+[2026-05-11 10:54:35] [INFO] Fine-tune Epoch 215 | Train Loss: 4.8235 | Val Loss: 5.2211
+[2026-05-11 10:54:47] [INFO] Fine-tune Epoch 220 | Train Loss: 4.8285 | Val Loss: 5.2211
+[2026-05-11 10:55:01] [INFO] Fine-tune Epoch 225 | Train Loss: 4.8271 | Val Loss: 5.2085
+[2026-05-11 10:55:15] [INFO] Fine-tune Epoch 230 | Train Loss: 4.8100 | Val Loss: 5.2168
+[2026-05-11 10:55:29] [INFO] Fine-tune Epoch 235 | Train Loss: 4.8249 | Val Loss: 5.2195
+[2026-05-11 10:55:43] [INFO] Fine-tune Epoch 240 | Train Loss: 4.8213 | Val Loss: 5.2151
+[2026-05-11 10:55:58] [INFO] Fine-tune Epoch 245 | Train Loss: 4.8067 | Val Loss: 5.2122
+[2026-05-11 10:56:11] [INFO] Fine-tune Epoch 250 | Train Loss: 4.8229 | Val Loss: 5.2176
+[2026-05-11 10:56:24] [INFO] Fine-tune Epoch 255 | Train Loss: 4.7785 | Val Loss: 5.2078
+[2026-05-11 10:56:37] [INFO] Fine-tune Epoch 260 | Train Loss: 4.8226 | Val Loss: 5.2071
+[2026-05-11 10:56:50] [INFO] Fine-tune Epoch 265 | Train Loss: 4.8035 | Val Loss: 5.2122
+[2026-05-11 10:57:02] [INFO] Fine-tune Epoch 270 | Train Loss: 4.8045 | Val Loss: 5.2123
+[2026-05-11 10:57:15] [INFO] Fine-tune Epoch 275 | Train Loss: 4.7957 | Val Loss: 5.2152
+[2026-05-11 10:57:29] [INFO] Fine-tune Epoch 280 | Train Loss: 4.8059 | Val Loss: 5.2053
+[2026-05-11 10:57:43] [INFO] Fine-tune Epoch 285 | Train Loss: 4.7980 | Val Loss: 5.1993
+[2026-05-11 10:57:56] [INFO] Fine-tune Epoch 290 | Train Loss: 4.7714 | Val Loss: 5.2090
+[2026-05-11 10:58:11] [INFO] Fine-tune Epoch 295 | Train Loss: 4.7889 | Val Loss: 5.1990
+[2026-05-11 10:58:25] [INFO] Fine-tune Epoch 300 | Train Loss: 4.7901 | Val Loss: 5.2031
+[2026-05-11 10:58:37] [INFO] Fine-tune Epoch 305 | Train Loss: 4.7937 | Val Loss: 5.2003
+[2026-05-11 10:58:51] [INFO] Fine-tune Epoch 310 | Train Loss: 4.7958 | Val Loss: 5.2080
+[2026-05-11 10:59:03] [INFO] Fine-tune Epoch 315 | Train Loss: 4.7938 | Val Loss: 5.2067
+[2026-05-11 10:59:17] [INFO] Fine-tune Epoch 320 | Train Loss: 4.7673 | Val Loss: 5.2078
+[2026-05-11 10:59:30] [INFO] Fine-tune Epoch 325 | Train Loss: 4.7599 | Val Loss: 5.2014
+[2026-05-11 10:59:43] [INFO] Fine-tune Epoch 330 | Train Loss: 4.7960 | Val Loss: 5.1981
+[2026-05-11 10:59:56] [INFO] Fine-tune Epoch 335 | Train Loss: 4.7667 | Val Loss: 5.1950
+[2026-05-11 11:00:10] [INFO] Fine-tune Epoch 340 | Train Loss: 4.7873 | Val Loss: 5.1964
+[2026-05-11 11:00:25] [INFO] Fine-tune Epoch 345 | Train Loss: 4.7996 | Val Loss: 5.1979
+[2026-05-11 11:00:39] [INFO] Fine-tune Epoch 350 | Train Loss: 4.7949 | Val Loss: 5.2118
+[2026-05-11 11:00:53] [INFO] Fine-tune Epoch 355 | Train Loss: 4.7881 | Val Loss: 5.1965
+[2026-05-11 11:01:07] [INFO] Fine-tune Epoch 360 | Train Loss: 4.7837 | Val Loss: 5.1977
+[2026-05-11 11:01:20] [INFO] Fine-tune Epoch 365 | Train Loss: 4.7896 | Val Loss: 5.1846
+[2026-05-11 11:01:34] [INFO] Fine-tune Epoch 370 | Train Loss: 4.7660 | Val Loss: 5.1993
+[2026-05-11 11:01:47] [INFO] Fine-tune Epoch 375 | Train Loss: 4.7696 | Val Loss: 5.1971
+[2026-05-11 11:02:01] [INFO] Fine-tune Epoch 380 | Train Loss: 4.7855 | Val Loss: 5.2010
+[2026-05-11 11:02:14] [INFO] Fine-tune Epoch 385 | Train Loss: 4.7859 | Val Loss: 5.1951
+[2026-05-11 11:02:28] [INFO] Fine-tune Epoch 390 | Train Loss: 4.7993 | Val Loss: 5.1924
+[2026-05-11 11:02:42] [INFO] Fine-tune Epoch 395 | Train Loss: 4.7915 | Val Loss: 5.1901
+[2026-05-11 11:02:55] [INFO] Fine-tune Epoch 400 | Train Loss: 4.7825 | Val Loss: 5.1923
+[2026-05-11 11:03:08] [INFO] Fine-tune Epoch 405 | Train Loss: 4.7789 | Val Loss: 5.2063
+[2026-05-11 11:03:22] [INFO] Fine-tune Epoch 410 | Train Loss: 4.7728 | Val Loss: 5.1882
+[2026-05-11 11:03:36] [INFO] Fine-tune Epoch 415 | Train Loss: 4.7837 | Val Loss: 5.1899
+[2026-05-11 11:03:50] [INFO] Fine-tune Epoch 420 | Train Loss: 4.7937 | Val Loss: 5.1960
+[2026-05-11 11:04:03] [INFO] Fine-tune Epoch 425 | Train Loss: 4.7765 | Val Loss: 5.2025
+[2026-05-11 11:04:16] [INFO] Fine-tune Epoch 430 | Train Loss: 4.7842 | Val Loss: 5.2010
+[2026-05-11 11:04:31] [INFO] Fine-tune Epoch 435 | Train Loss: 4.7768 | Val Loss: 5.2053
+[2026-05-11 11:04:45] [INFO] Fine-tune Epoch 440 | Train Loss: 4.7796 | Val Loss: 5.1948
+[2026-05-11 11:04:59] [INFO] Fine-tune Epoch 445 | Train Loss: 4.7799 | Val Loss: 5.1982
+[2026-05-11 11:05:12] [INFO] Fine-tune Epoch 450 | Train Loss: 4.7835 | Val Loss: 5.1937
+[2026-05-11 11:05:26] [INFO] Fine-tune Epoch 455 | Train Loss: 4.7801 | Val Loss: 5.1992
+[2026-05-11 11:05:40] [INFO] Fine-tune Epoch 460 | Train Loss: 4.7561 | Val Loss: 5.1965
+[2026-05-11 11:05:53] [INFO] Fine-tune Epoch 465 | Train Loss: 4.7608 | Val Loss: 5.1929
+[2026-05-11 11:06:08] [INFO] Fine-tune Epoch 470 | Train Loss: 4.7530 | Val Loss: 5.2023
+[2026-05-11 11:06:22] [INFO] Fine-tune Epoch 475 | Train Loss: 4.7802 | Val Loss: 5.2021
+[2026-05-11 11:06:35] [INFO] Fine-tune Epoch 480 | Train Loss: 4.7804 | Val Loss: 5.1967
+[2026-05-11 11:06:50] [INFO] Fine-tune Epoch 485 | Train Loss: 4.7504 | Val Loss: 5.1872
+[2026-05-11 11:07:03] [INFO] Fine-tune Epoch 490 | Train Loss: 4.7920 | Val Loss: 5.2003
+[2026-05-11 11:07:16] [INFO] Fine-tune Epoch 495 | Train Loss: 4.7710 | Val Loss: 5.1953
+[2026-05-11 11:07:27] [INFO] ✅ 训练完成，最佳模型已保存。

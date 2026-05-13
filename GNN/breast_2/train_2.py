@@ -10,9 +10,12 @@
 4. [NEW] 安全边缘属性缩放，避免 log(0) 梯度爆炸。
 5. [NEW] AdamW + Warmup + CosineAnnealingLR 工业级炼丹策略。
 ================================================================================
-MorphGAT (GNN)  : 0.5440
 """
-
+import os
+# 必须放在导入 sklearn 或 torch 之前！
+os.environ["OPENBLAS_NUM_THREADS"] = "32"
+os.environ["OMP_NUM_THREADS"] = "32"
+import argparse
 import os
 import glob
 import random
@@ -79,8 +82,8 @@ class ContrastiveGraphDataset(Dataset):
             raise ValueError(f"\n❌ 发现脏数据！文件: {self.file_list[idx]}\n节点特征维度异常: {data_orig.x.shape[1]}")
         
         data_corr = self.augmentor(data_orig)
-        data_orig.x = apply_feature_masking(data_orig.x, drop_prob=0.1)
-        data_corr.x = apply_feature_masking(data_corr.x, drop_prob=0.2)
+        data_orig.x = apply_feature_masking(data_orig.x, drop_prob=0.2)
+        data_corr.x = apply_feature_masking(data_corr.x, drop_prob=0.3)
         return data_orig, data_corr
 
 # ==========================================
@@ -119,9 +122,9 @@ class MorphGATConv(MessagePassing):
         return x_j * F.dropout(alpha, p=self.dropout, training=self.training).unsqueeze(-1)
 
 class GCLModel_Morph(nn.Module):
-    def __init__(self, in_channels=233, hidden_channels=128, out_channels=32, n_clusters=4):
+    def __init__(self, in_channels=233, hidden_channels=128, out_channels=32, n_clusters=20):
         super().__init__()
-        self.heads1 = 4 
+        self.heads1 = 8 
         
         self.gate1 = nn.Sequential(nn.Linear(hidden_channels * self.heads1, 1), nn.Sigmoid())
         self.gate2 = nn.Sequential(nn.Linear(hidden_channels, 1), nn.Sigmoid())
@@ -161,7 +164,7 @@ class GCLModel_Morph(nn.Module):
         g1 = self.gate1(conv1_out)  
         x = conv1_out * g1 + raw1 * (1.0 - g1)
         
-        x = F.dropout(x, p=0.4, training=self.training)
+        x = F.dropout(x, p=0.2, training=self.training)
         conv2_out = self.conv2(x, edge_index, edge_attr)
         raw2 = self.raw_proj2(x_raw)
         g2 = self.gate2(conv2_out)  
@@ -216,7 +219,7 @@ def spatial_contrastive_loss(z1, z2, edge_index, x_raw, batch, temperature=0.2, 
         valid_neighbor_sims = raw_sim[neighbors_only.bool()]
         
         if valid_neighbor_sims.numel() > 0:
-            adaptive_thresh = torch.quantile(valid_neighbor_sims.float(), 0.10)
+            adaptive_thresh = torch.quantile(valid_neighbor_sims.float(), 0.20)
             hard_neg_mask = (neighbors_only * (raw_sim < adaptive_thresh)).float()
         else:
             hard_neg_mask = torch.zeros_like(adj)
@@ -342,7 +345,7 @@ def train(args):
     # ---------------------------------------------------------
     logger.info(f"🚀 Phase 3: 联合微调 ({args.epochs} Epochs)...")
     
-    optimizer_fine = torch.optim.AdamW(model.parameters(), lr=args.lr * 0.1, weight_decay=1e-4)
+    optimizer_fine = torch.optim.AdamW(model.parameters(), lr=args.lr * 0.5, weight_decay=1e-4)
     scheduler_fine = CosineAnnealingLR(optimizer_fine, T_max=args.epochs)
 
     best_val_loss = float('inf'); patience_counter = 0
@@ -424,24 +427,24 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MorphGAT Pan-Cancer Pipeline")
     parser.add_argument("--data_dir", type=str, default="/data/home/wangzz_group/zhaipengyuan/BEPH-main/DATA_DIRECTORY/kz_data/Graph_pt/")
-    parser.add_argument("--save_dir", type=str, default="checkpoints")
-    parser.add_argument("--gpu", type=str, default="4")
+    parser.add_argument("--save_dir", type=str, default="checkpoints_2")
+    parser.add_argument("--gpu", type=str, default="1")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--hard_weight", type=float, default=1.5)
+    parser.add_argument("--hard_weight", type=float, default=1.2)
     
     parser.add_argument("--pretrain_epochs", type=int, default=150)
     parser.add_argument("--epochs", type=int, default=500)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=0.0001)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=0.00015)
     
     # ✨ 优化 7: 调低默认温度至 0.2，增强拉扯负样本时的梯度信号
-    parser.add_argument("--temp", type=float, default=0.2)
+    parser.add_argument("--temp", type=float, default=0.15)
     
     parser.add_argument("--hidden_dim", type=int, default=128)
     parser.add_argument("--patience", type=int, default=150)
-    parser.add_argument("--n_clusters", type=int, default=4)
+    parser.add_argument("--n_clusters", type=int, default=20)
     parser.add_argument("--lambda_rec", type=float, default=1.0)
-    parser.add_argument("--lambda_dec", type=float, default=1.0)
+    parser.add_argument("--lambda_dec", type=float, default=0.2)
     parser.add_argument("--clip", type=float, default=1.0)
     parser.add_argument("--in_dim", type=int, default=None)
 
