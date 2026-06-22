@@ -15,3 +15,28 @@ demo_data/
 *.jpg
 *.jpeg
 *.h5ad
+# Editor
+.vscode/
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+**/checkpoints*/
+**/checkpoints_*/
+
+# Generated results
+GNN/Result_2/
+GNN/Result_3/
+
+# Large data
+*.h5
+*.h5ad
